@@ -129,7 +129,7 @@ export default function HomePage() {
             description: r.description || '',
             imageUrl: r.image_url || undefined,
             createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
-            source: r.source || 'photo',
+            source: (String(r.source || 'photo').toLowerCase() as NutritionRecord['source']),
           }));
           setRecords(mapped as NutritionRecord[]);
         }
@@ -156,7 +156,7 @@ export default function HomePage() {
     // intake totals only (exclude exercise records)
     return filteredRecords.reduce(
       (acc, record) => {
-        if (record.source !== 'exercise') {
+        if (String(record.source).toLowerCase() !== 'exercise') {
           acc.calories += record.calories;
           acc.protein += record.protein;
           acc.fat += record.fat;
@@ -170,7 +170,10 @@ export default function HomePage() {
   }, [filteredRecords]);
 
   const exerciseCalories = useMemo(() => {
-    return filteredRecords.reduce((acc, record) => (record.source === 'exercise' ? acc + (record.calories || 0) : acc), 0);
+    return filteredRecords.reduce(
+      (acc, record) => (String(record.source).toLowerCase() === 'exercise' ? acc + (record.calories || 0) : acc),
+      0
+    );
   }, [filteredRecords]);
 
   const recommended = useMemo(() => getDRI(profile), [profile]);
@@ -698,7 +701,11 @@ export default function HomePage() {
               <div key={record.id} className="summary-item">
                 <div>
                   <div><strong>{record.name}</strong> <small>{record.amountText}</small></div>
-                  <div><small>{record.source === 'favorite' ? '定番食品' : '写真推定'}</small></div>
+                  <div>
+                    <small>
+                      {record.source === 'favorite' ? '定番食品' : record.source === 'exercise' ? '運動記録' : '写真推定'}
+                    </small>
+                  </div>
                 </div>
                 <div className="record-actions">
                   <span>{record.calories.toFixed(0)} kcal</span>
