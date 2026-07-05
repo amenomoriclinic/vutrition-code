@@ -56,14 +56,18 @@ export default function NutritionChart({ totals, profile, date }: Props) {
 
   const options = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { position: "top" as const },
       title: { display: true, text: `日次栄養比較 (${date})` },
     },
+    scales: {
+      y: { beginAtZero: true }
+    }
   };
 
   return (
-    <div style={{ maxWidth: 800 }}>
+    <div className="chart-container" style={{ maxWidth: 800 }}>
       <Bar data={data} options={options} />
     </div>
   );

@@ -160,6 +160,13 @@ small {
   min-height: 580px;
 }
 
+.chart-container {
+  width: 100%;
+  max-width: 800px;
+  height: 100%;
+  min-height: 520px;
+}
+
 .record-actions {
   display: flex;
   flex-wrap: wrap;
@@ -189,6 +196,9 @@ small {
 
   .button-danger {
     width: 100%;
+  }
+  .chart-container {
+    min-height: 600px;
   }
 }
 
