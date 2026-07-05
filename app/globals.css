@@ -193,6 +193,16 @@ small {
   min-height: 230px;
 }
 
+.metric-panel-calories {
+  min-height: 320px;
+}
+
+.metric-legend-note {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
 .record-actions {
   display: flex;
   flex-wrap: wrap;
@@ -228,6 +238,9 @@ small {
   }
   .metric-panel {
     min-height: 200px;
+  }
+  .metric-panel-calories {
+    min-height: 300px;
   }
 }
 

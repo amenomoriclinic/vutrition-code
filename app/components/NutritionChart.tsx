@@ -115,7 +115,7 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
           ...simpleBars,
         },
         {
-          label: "総消費（オレンジ）: 青=橙で維持 / 青>橙で増 / 青<橙で減",
+          label: "総消費（オレンジ）",
           backgroundColor: "rgba(245,158,11,0.85)",
           data: [totalConsumptionCalories ?? 0],
           ...simpleBars,
@@ -139,8 +139,9 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
   return (
     <div className="metric-chart-grid">
       <div className="metric-row-1">
-        <div className="metric-panel">
+        <div className="metric-panel metric-panel-calories">
           <Bar data={caloriesChart.data} options={caloriesChart.options} />
+          <small className="metric-legend-note">判定: 青=橙で維持 / 青&gt;橙で増 / 青&lt;橙で減</small>
         </div>
       </div>
       <div className="metric-row-2">
