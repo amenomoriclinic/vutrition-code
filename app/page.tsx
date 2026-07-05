@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import supabase from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
 import { getDRI } from '../lib/dri';
 
@@ -73,17 +74,8 @@ export default function HomePage() {
   const [favoriteName, setFavoriteName] = useState('');
 
   useEffect(() => {
-    const savedRecords = localStorage.getItem(STORAGE_RECORDS);
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
     const savedProfile = localStorage.getItem(STORAGE_PROFILE);
-
-    if (savedRecords) {
-      try {
-        setRecords(JSON.parse(savedRecords));
-      } catch {
-        setRecords([]);
-      }
-    }
 
     if (savedFavorites) {
       try {
@@ -103,6 +95,37 @@ export default function HomePage() {
         setProfile(profile);
       }
     }
+
+    // fetch records from Supabase
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('nutrition_records')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (error) {
+          console.error('Supabase fetch error', error);
+        } else if (data) {
+          const mapped = data.map((r: any) => ({
+            id: r.id,
+            name: r.name || '',
+            amountText: r.amount_text || '',
+            calories: Number(r.calories) || 0,
+            protein: Number(r.protein) || 0,
+            fat: Number(r.fat) || 0,
+            carbs: Number(r.carbs) || 0,
+            salt: Number(r.salt) || 0,
+            description: r.description || '',
+            imageUrl: r.image_url || undefined,
+            createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
+            source: r.source || 'photo',
+          }));
+          setRecords(mapped as NutritionRecord[]);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -140,9 +163,7 @@ export default function HomePage() {
     return Math.round(base * pal);
   }, [profile]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_RECORDS, JSON.stringify(records));
-  }, [records]);
+  // records are persisted in Supabase; no localStorage sync needed
 
   useEffect(() => {
     localStorage.setItem(STORAGE_FAVORITES, JSON.stringify(favorites));
@@ -205,34 +226,97 @@ export default function HomePage() {
     }
   };
 
-  const saveRecord = () => {
+  const saveRecord = async () => {
     if (!estimate) return;
-    const record: NutritionRecord = {
-      ...estimate,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString().slice(0, 10),
-      source: 'photo',
-    };
-    setRecords([record, ...records]);
-    // ローカルのみで保存（Sheets 連携は無効化）
-    setEstimate(null);
-    setPhotoFile(null);
-    setPhotoPreview('');
-    setDescription('');
-    setStatusMessage('記録を保存しました。');
+    setLoading(true);
+    try {
+      const insert = {
+        name: estimate.name,
+        amount_text: estimate.amountText,
+        calories: estimate.calories,
+        protein: estimate.protein,
+        fat: estimate.fat,
+        carbs: estimate.carbs,
+        salt: estimate.salt,
+        source: 'photo',
+        description: estimate.description || null,
+      } as any;
+
+      const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+      if (error) {
+        console.error('Supabase insert error', error);
+        setStatusMessage('保存に失敗しました（ネットワークエラー）。');
+      } else if (data && data[0]) {
+        const r = data[0];
+        const record: NutritionRecord = {
+          id: r.id,
+          name: r.name || estimate.name,
+          amountText: r.amount_text || estimate.amountText,
+          calories: Number(r.calories) || estimate.calories,
+          protein: Number(r.protein) || estimate.protein,
+          fat: Number(r.fat) || estimate.fat,
+          carbs: Number(r.carbs) || estimate.carbs,
+          salt: Number(r.salt) || estimate.salt,
+          description: r.description || estimate.description,
+          imageUrl: r.image_url || undefined,
+          createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
+          source: r.source || 'photo',
+        };
+        setRecords([record, ...records]);
+        setStatusMessage('記録を保存しました。');
+      }
+    } catch (e) {
+      console.error(e);
+      setStatusMessage('保存中にエラーが発生しました。');
+    } finally {
+      setEstimate(null);
+      setPhotoFile(null);
+      setPhotoPreview('');
+      setDescription('');
+      setLoading(false);
+    }
   };
 
-  const addFavoriteRecord = (favorite: FavoriteFood) => {
-    const record: NutritionRecord = {
-      ...favorite,
-      description: favorite.name,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString().slice(0, 10),
+  const addFavoriteRecord = async (favorite: FavoriteFood) => {
+    const insert = {
+      name: favorite.name,
+      amount_text: favorite.amountText,
+      calories: favorite.calories,
+      protein: favorite.protein,
+      fat: favorite.fat,
+      carbs: favorite.carbs,
+      salt: favorite.salt,
       source: 'favorite',
-    };
-    setRecords([record, ...records]);
-    // Sheets 連携は無効のため何もしない
-    setStatusMessage(`${favorite.name} を記録しました。`);
+      description: favorite.name,
+    } as any;
+    try {
+      const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+      if (error) {
+        console.error('Supabase insert error', error);
+        setStatusMessage('保存に失敗しました。');
+      } else if (data && data[0]) {
+        const r = data[0];
+        const record: NutritionRecord = {
+          id: r.id,
+          name: r.name || favorite.name,
+          amountText: r.amount_text || favorite.amountText,
+          calories: Number(r.calories) || favorite.calories,
+          protein: Number(r.protein) || favorite.protein,
+          fat: Number(r.fat) || favorite.fat,
+          carbs: Number(r.carbs) || favorite.carbs,
+          salt: Number(r.salt) || favorite.salt,
+          description: r.description || favorite.name,
+          imageUrl: r.image_url || undefined,
+          createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
+          source: r.source || 'favorite',
+        };
+        setRecords([record, ...records]);
+        setStatusMessage(`${favorite.name} を記録しました。`);
+      }
+    } catch (e) {
+      console.error(e);
+      setStatusMessage('保存中にエラーが発生しました。');
+    }
   };
 
   const addFavorite = () => {
@@ -259,8 +343,21 @@ export default function HomePage() {
     if (!window.confirm('この記録を削除しますか？')) {
       return;
     }
-    setRecords(records.filter((record) => record.id !== id));
-    setStatusMessage('記録を削除しました。');
+    (async () => {
+      try {
+        const { error } = await supabase.from('nutrition_records').delete().eq('id', id).limit(1);
+        if (error) {
+          console.error('Supabase delete error', error);
+          setStatusMessage('削除に失敗しました。');
+          return;
+        }
+        setRecords(records.filter((record) => record.id !== id));
+        setStatusMessage('記録を削除しました。');
+      } catch (e) {
+        console.error(e);
+        setStatusMessage('削除中にエラーが発生しました。');
+      }
+    })();
   };
 
   return (
