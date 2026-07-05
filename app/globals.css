@@ -194,7 +194,7 @@ small {
 }
 
 .metric-panel-calories {
-  min-height: 320px;
+  min-height: 230px;
 }
 
 .metric-legend-note {
@@ -240,7 +240,7 @@ small {
     min-height: 200px;
   }
   .metric-panel-calories {
-    min-height: 300px;
+    min-height: 200px;
   }
 }
 
