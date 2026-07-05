@@ -255,6 +255,14 @@ export default function HomePage() {
     setStatusMessage('マイ定番食品に保存しました。');
   };
 
+  const removeRecord = (id: string) => {
+    if (!window.confirm('この記録を削除しますか？')) {
+      return;
+    }
+    setRecords(records.filter((record) => record.id !== id));
+    setStatusMessage('記録を削除しました。');
+  };
+
   return (
     <main>
       <div className="page-card">
@@ -344,7 +352,7 @@ export default function HomePage() {
 
       <div className="page-card">
         <h2 className="section-title">プロフィール</h2>
-        <div className="field-grid field-grid-2">
+        <div className="profile-grid">
           <label>
             年齢
             <input type="number" value={profile.age} onChange={(e) => setProfile({ ...profile, age: Number(e.target.value) })} />
@@ -415,7 +423,7 @@ export default function HomePage() {
           <span>必要量との差</span>
           <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
         </div>
-        <div style={{ marginTop: 16 }}>
+        <div className="chart-wrapper">
           <NutritionChart totals={totals} profile={profile} date={dateFilter} />
         </div>
       </div>
@@ -432,7 +440,12 @@ export default function HomePage() {
                   <div><strong>{record.name}</strong> <small>{record.amountText}</small></div>
                   <div><small>{record.source === 'favorite' ? '定番食品' : '写真推定'}</small></div>
                 </div>
-                <div>{record.calories.toFixed(0)} kcal</div>
+                <div className="record-actions">
+                  <span>{record.calories.toFixed(0)} kcal</span>
+                  <button type="button" className="button-danger" onClick={() => removeRecord(record.id)}>
+                    🗑️ 削除
+                  </button>
+                </div>
               </div>
             ))}
           </div>
