@@ -23,7 +23,7 @@ type NutritionEstimate = {
 type NutritionRecord = NutritionEstimate & {
   id: string;
   createdAt: string;
-  source: 'photo' | 'favorite';
+  source: 'photo' | 'favorite' | 'exercise';
 };
 
 type FavoriteFood = {
