@@ -10,6 +10,8 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const photo = formData.get('photo');
   const description = String(formData.get('description') || '').trim();
+  const mode = String(formData.get('mode') || 'food');
+  const consumedGrams = Number(formData.get('consumedGrams') || 100);
 
   if (!photo || !(photo instanceof File)) {
     return NextResponse.json({ error: 'Photo is required.' }, { status: 400 });
@@ -18,9 +20,9 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await photo.arrayBuffer());
   const base64 = buffer.toString('base64');
 
-  const prompt = `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。追加情報: ${description || 'なし'}
-必ず以下の形式のJSONのみ返してください:
-{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`;
+  const prompt = mode === 'label'
+    ? `この画像には食品パッケージの栄養成分表示が写っています。以下のJSONだけを返してください。食品名、栄養表示の基準量、100gあたりの栄養素値、または栄養表示の量を読み取ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"100gあたり","baseAmount":100,"baseUnit":"g","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
+    : `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -63,6 +65,10 @@ export async function POST(request: Request) {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     const parsed = JSON.parse(text.slice(start, end + 1));
+    if (mode === 'label') {
+      parsed.mode = 'label';
+      parsed.consumedGrams = consumedGrams;
+    }
     return NextResponse.json({ estimate: parsed });
   } catch {
     return NextResponse.json({ error: 'Unable to parse response.', raw: text }, { status: 500 });

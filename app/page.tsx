@@ -64,6 +64,8 @@ export default function HomePage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>('');
   const [description, setDescription] = useState('');
+  const [scanMode, setScanMode] = useState<'food' | 'label'>('food');
+  const [consumedGrams, setConsumedGrams] = useState(100);
   const [estimate, setEstimate] = useState<NutritionEstimate | null>(null);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
@@ -199,6 +201,10 @@ export default function HomePage() {
       const formData = new FormData();
       formData.append('photo', photoFile);
       formData.append('description', description);
+      formData.append('mode', scanMode);
+      if (scanMode === 'label') {
+        formData.append('consumedGrams', String(consumedGrams));
+      }
 
       const response = await fetch('/api/vision', {
         method: 'POST',
@@ -212,17 +218,35 @@ export default function HomePage() {
         return;
       }
 
-      const estimateResponse: NutritionEstimate = {
-        name: result.estimate.name || '不明な料理',
-        amountText: result.estimate.amountText || '1品',
-        calories: Number(result.estimate.calories) || 0,
-        protein: Number(result.estimate.protein) || 0,
-        fat: Number(result.estimate.fat) || 0,
-        carbs: Number(result.estimate.carbs) || 0,
-        salt: Number(result.estimate.salt) || 0,
-        description,
-        imageUrl: photoPreview,
-      };
+      let estimateResponse: NutritionEstimate;
+      if (result.estimate.mode === 'label') {
+        const baseAmount = Number(result.estimate.baseAmount) || 100;
+        const grams = Number(result.estimate.consumedGrams || consumedGrams) || consumedGrams;
+        const scale = grams / baseAmount;
+        estimateResponse = {
+          name: result.estimate.name || '不明な食品',
+          amountText: `${grams}g`,
+          calories: Math.round((Number(result.estimate.calories) || 0) * scale * 10) / 10,
+          protein: Math.round((Number(result.estimate.protein) || 0) * scale * 10) / 10,
+          fat: Math.round((Number(result.estimate.fat) || 0) * scale * 10) / 10,
+          carbs: Math.round((Number(result.estimate.carbs) || 0) * scale * 10) / 10,
+          salt: Math.round((Number(result.estimate.salt) || 0) * scale * 10) / 10,
+          description: `${description} (${baseAmount}gあたりの栄養表示を${grams}g換算)`,
+          imageUrl: photoPreview,
+        };
+      } else {
+        estimateResponse = {
+          name: result.estimate.name || '不明な料理',
+          amountText: result.estimate.amountText || '1品',
+          calories: Number(result.estimate.calories) || 0,
+          protein: Number(result.estimate.protein) || 0,
+          fat: Number(result.estimate.fat) || 0,
+          carbs: Number(result.estimate.carbs) || 0,
+          salt: Number(result.estimate.salt) || 0,
+          description,
+          imageUrl: photoPreview,
+        };
+      }
 
       setEstimate(estimateResponse);
       setStatusMessage('推定結果を確認して保存してください。');
@@ -389,9 +413,22 @@ export default function HomePage() {
         <h2 className="section-title">写真から栄養推定</h2>
         <div className="field-grid">
           <label>
-            食事写真
+            読み取りモード
+            <div className="mode-options">
+              <label><input type="radio" name="scanMode" value="food" checked={scanMode === 'food'} onChange={() => setScanMode('food')} /> 通常の料理写真</label>
+              <label><input type="radio" name="scanMode" value="label" checked={scanMode === 'label'} onChange={() => setScanMode('label')} /> パッケージ栄養表示を読む</label>
+            </div>
+          </label>
+          <label>
+            写真
             <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} />
           </label>
+          {scanMode === 'label' ? (
+            <label>
+              食べた量 (g)
+              <input type="number" min="1" value={consumedGrams} onChange={(e) => setConsumedGrams(Number(e.target.value))} />
+            </label>
+          ) : null}
           {photoPreview ? <img className="image-preview" src={photoPreview} alt="preview" /> : null}
           <label>
             店名・商品名・メーカー名など(任意)
