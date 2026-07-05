@@ -39,6 +39,23 @@ type FavoriteFood = {
 
 const isExerciseSource = (source: unknown) => String(source ?? '').trim().toLowerCase() === 'exercise';
 
+const isValidFavorite = (v: any): v is FavoriteFood => {
+  return !!v && typeof v.id === 'string' && typeof v.name === 'string';
+};
+
+const isLegacyInoras120 = (v: FavoriteFood) => {
+  const id = String(v.id || '').toLowerCase();
+  const name = String(v.name || '').toLowerCase();
+  return id.includes('120') || name.includes('120ml') || name.includes('120ml') || name.includes('120ml');
+};
+
+const mergeFavorites = (saved: FavoriteFood[], defaults: FavoriteFood[]) => {
+  const map = new Map<string, FavoriteFood>();
+  for (const f of defaults) map.set(f.id, f);
+  for (const f of saved) map.set(f.id, f);
+  return Array.from(map.values());
+};
+
 const STORAGE_RECORDS = 'nutrition_records';
 const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
@@ -116,12 +133,29 @@ export default function HomePage() {
     if (savedFavorites) {
       try {
         const parsed = JSON.parse(savedFavorites);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setFavorites(parsed);
+        if (Array.isArray(parsed)) {
+          const normalized = parsed
+            .filter(isValidFavorite)
+            .map((f) => ({
+              id: String(f.id),
+              name: String(f.name),
+              amountText: String(f.amountText || '1単位'),
+              calories: Number(f.calories) || 0,
+              protein: Number(f.protein) || 0,
+              fat: Number(f.fat) || 0,
+              carbs: Number(f.carbs) || 0,
+              salt: Number(f.salt) || 0,
+            }))
+            .filter((f) => !isLegacyInoras120(f));
+          setFavorites(mergeFavorites(normalized, defaultFavorites));
+        } else {
+          setFavorites(defaultFavorites);
         }
       } catch {
         setFavorites(defaultFavorites);
       }
+    } else {
+      setFavorites(defaultFavorites);
     }
 
     if (savedProfile) {
@@ -434,6 +468,14 @@ export default function HomePage() {
     setStatusMessage('マイ定番食品に保存しました。');
   };
 
+  const removeFavorite = (id: string) => {
+    if (!window.confirm('この定番食品を削除しますか？')) {
+      return;
+    }
+    setFavorites(favorites.filter((f) => f.id !== id));
+    setStatusMessage('定番食品を削除しました。');
+  };
+
   const removeRecord = (id: string) => {
     if (!window.confirm('この記録を削除しますか？')) {
       return;
@@ -625,9 +667,14 @@ export default function HomePage() {
         </div>
         <div className="card-row">
           {favorites.map((favorite) => (
-            <button key={favorite.id} className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
-              {favorite.name}
-            </button>
+            <div key={favorite.id} style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+              <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
+                {favorite.name}
+              </button>
+              <button className="button-danger" type="button" onClick={() => removeFavorite(favorite.id)}>
+                削除
+              </button>
+            </div>
           ))}
         </div>
       </div>
