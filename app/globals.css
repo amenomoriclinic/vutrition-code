@@ -157,14 +157,14 @@ small {
 }
 
 .chart-wrapper {
-  min-height: 640px;
+  min-height: 820px;
 }
 
 .chart-container {
   width: 100%;
   max-width: 800px;
   height: 100%;
-  min-height: 620px;
+  min-height: 800px;
 }
 
 .metric-chart-grid {
@@ -172,15 +172,16 @@ small {
   gap: 12px;
 }
 
-.metric-row-top {
+.metric-row-1 {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
-.metric-row-bottom {
+.metric-row-2,
+.metric-row-3 {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -223,10 +224,10 @@ small {
     width: 100%;
   }
   .chart-container {
-    min-height: 760px;
+    min-height: 900px;
   }
   .metric-panel {
-    min-height: 190px;
+    min-height: 200px;
   }
 }
 

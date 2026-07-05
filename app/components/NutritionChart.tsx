@@ -131,18 +131,20 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
 
   return (
     <div className="metric-chart-grid">
-      <div className="metric-row-top">
+      <div className="metric-row-1">
         <div className="metric-panel">
           <Bar data={caloriesChart.data} options={caloriesChart.options} />
         </div>
+      </div>
+      <div className="metric-row-2">
         <div className="metric-panel">
           <Bar data={carbsChart.data} options={carbsChart.options} />
         </div>
-      </div>
-      <div className="metric-row-bottom">
         <div className="metric-panel">
           <Bar data={proteinChart.data} options={proteinChart.options} />
         </div>
+      </div>
+      <div className="metric-row-3">
         <div className="metric-panel">
           <Bar data={fatChart.data} options={fatChart.options} />
         </div>
