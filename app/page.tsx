@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import NutritionChart from './components/NutritionChart';
+import { getDRI } from '../lib/dri';
 
 type Sex = 'male' | 'female';
 type ActivityLevel = 'low' | 'moderate' | 'high';
@@ -130,6 +132,8 @@ export default function HomePage() {
     );
   }, [filteredRecords]);
 
+  const recommended = useMemo(() => getDRI(profile), [profile]);
+
   const estimatedEnergy = useMemo(() => {
     const base = profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight;
     const pal = profile.activity === 'low' ? 1.4 : profile.activity === 'high' ? 1.75 : 1.55;
@@ -210,6 +214,22 @@ export default function HomePage() {
       source: 'photo',
     };
     setRecords([record, ...records]);
+    // Google Sheets に保存（失敗してもアプリは継続）
+    try {
+      fetch('/api/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timestamp: new Date().toISOString(),
+          name: record.name,
+          calories: record.calories,
+          protein: record.protein,
+          fat: record.fat,
+          carbs: record.carbs,
+          salt: record.salt,
+        }),
+      }).catch(() => {});
+    } catch {}
     setEstimate(null);
     setPhotoFile(null);
     setPhotoPreview('');
@@ -226,6 +246,21 @@ export default function HomePage() {
       source: 'favorite',
     };
     setRecords([record, ...records]);
+    try {
+      fetch('/api/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timestamp: new Date().toISOString(),
+          name: record.name,
+          calories: record.calories,
+          protein: record.protein,
+          fat: record.fat,
+          carbs: record.carbs,
+          salt: record.salt,
+        }),
+      }).catch(() => {});
+    } catch {}
     setStatusMessage(`${favorite.name} を記録しました。`);
   };
 
@@ -397,8 +432,15 @@ export default function HomePage() {
           <strong>{estimatedEnergy.toFixed(0)} kcal</strong>
         </div>
         <div className="summary-item">
+          <span>推奨（DRI 2025 暫定）</span>
+          <strong>{recommended.kcal} kcal / P:{recommended.protein}g F:{recommended.fat}g C:{recommended.carbs}g Na:{recommended.salt}g</strong>
+        </div>
+        <div className="summary-item">
           <span>必要量との差</span>
           <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <NutritionChart totals={totals} profile={profile} date={dateFilter} />
         </div>
       </div>
 

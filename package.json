@@ -10,7 +10,10 @@
   "dependencies": {
     "next": "14.2.5",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "chart.js": "^4.4.0",
+    "react-chartjs-2": "^6.2.0",
+    "googleapis": "^119.0.0"
   },
   "devDependencies": {
     "@types/node": "20.14.2",
