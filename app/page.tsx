@@ -182,6 +182,14 @@ export default function HomePage() {
     return Math.round(base * pal);
   }, [profile]);
 
+  const basalMetabolism = useMemo(() => {
+    return Math.round(profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight);
+  }, [profile]);
+
+  const totalConsumptionCalories = useMemo(() => {
+    return basalMetabolism + exerciseCalories;
+  }, [basalMetabolism, exerciseCalories]);
+
   // records are persisted in Supabase; no localStorage sync needed
 
   useEffect(() => {
@@ -647,11 +655,15 @@ export default function HomePage() {
         </div>
         <div className="summary-item">
           <span>基礎代謝の目安</span>
-          <strong>{(profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight).toFixed(0)} kcal</strong>
+          <strong>{basalMetabolism.toFixed(0)} kcal</strong>
         </div>
         <div className="summary-item">
           <span>運動による消費カロリー</span>
           <strong>{exerciseCalories.toFixed(0)} kcal</strong>
+        </div>
+        <div className="summary-item">
+          <span>総消費カロリー（基礎代謝＋運動）</span>
+          <strong>{totalConsumptionCalories.toFixed(0)} kcal</strong>
         </div>
         <div className="summary-item">
           <span>推定エネルギー必要量</span>
@@ -670,6 +682,7 @@ export default function HomePage() {
           <span>必要量との差</span>
           <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
         </div>
+        <p><small>グラフの赤い棒は運動記録に入力した消費カロリーのみで、基礎代謝は含みません。</small></p>
         <div className="chart-wrapper">
           <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} date={dateFilter} />
         </div>
