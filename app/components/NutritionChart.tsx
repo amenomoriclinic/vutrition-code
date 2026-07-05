@@ -30,124 +30,125 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
   const recFatG = Math.round(((recommended.kcal * (fatPctAvg / 100)) / 9) * 10) / 10;
   const recCarbsG = Math.round(((recommended.kcal * (carbsPctAvg / 100)) / 4) * 10) / 10;
 
-  const caloriesData = {
-    labels: ["カロリー(kcal)"],
-    datasets: [
-      {
-        label: "摂取カロリー",
-        backgroundColor: "rgba(54,162,235,0.8)",
-        barThickness: 20,
-        maxBarThickness: 24,
-        categoryPercentage: 0.5,
-        barPercentage: 0.7,
-        data: [totals.calories],
-      },
-      {
-        label: "運動による消費カロリー",
-        backgroundColor: "rgba(255,99,132,0.75)",
-        barThickness: 20,
-        maxBarThickness: 24,
-        categoryPercentage: 0.5,
-        barPercentage: 0.7,
-        data: [consumptionCalories ?? 0],
-      },
-      {
-        label: "DRI 2025による推奨摂取カロリー",
-        backgroundColor: "rgba(75,192,192,0.75)",
-        barThickness: 20,
-        maxBarThickness: 24,
-        categoryPercentage: 0.5,
-        barPercentage: 0.7,
-        data: [recommended.kcal],
-      },
-    ],
+  const simpleBars = {
+    barThickness: 14,
+    maxBarThickness: 18,
+    categoryPercentage: 0.55,
+    barPercentage: 0.7,
   };
 
-  const nutrientsData = {
-    labels: ["タンパク質(g)", "脂質(g)", "炭水化物(g)", "食塩相当量(g)"],
-    datasets: [
-      {
-        label: "摂取量",
-        backgroundColor: "rgba(54,162,235,0.8)",
-        barThickness: 18,
-        maxBarThickness: 22,
-        categoryPercentage: 0.5,
-        barPercentage: 0.7,
-        data: [totals.protein, totals.fat, totals.carbs, totals.salt],
-      },
-      {
-        label: "推奨量（DRI 2025）",
-        backgroundColor: "rgba(75,192,192,0.75)",
-        barThickness: 18,
-        maxBarThickness: 22,
-        categoryPercentage: 0.5,
-        barPercentage: 0.7,
-        data: [recommended.protein, recFatG, recCarbsG, recommended.salt],
-      },
-    ],
-  };
-
-  const caloriesOptions = {
+  const baseOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
         position: "top" as const,
         labels: {
-          boxWidth: 18,
-          boxHeight: 18,
-          padding: 18,
+          boxWidth: 12,
+          boxHeight: 12,
+          padding: 10,
           font: {
-            size: 14,
+            size: 12,
             weight: "bold" as const,
           },
         },
       },
-      title: { display: true, text: `日次カロリー比較 (${date})`, font: { size: 16, weight: "bold" as const } },
+      title: { display: true, text: "", font: { size: 13, weight: "bold" as const } },
       tooltip: {
-        titleFont: { size: 14, weight: "bold" as const },
-        bodyFont: { size: 13 },
-      },
-    },
-    scales: {
-      y: { beginAtZero: true }
-    }
-  };
-
-  const nutrientsOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: "top" as const,
-        labels: {
-          boxWidth: 16,
-          boxHeight: 16,
-          padding: 16,
-          font: {
-            size: 13,
-            weight: "bold" as const,
-          },
-        },
-      },
-      title: { display: true, text: `日次栄養素比較 (${date})`, font: { size: 15, weight: "bold" as const } },
-      tooltip: {
-        titleFont: { size: 13, weight: "bold" as const },
+        titleFont: { size: 12, weight: "bold" as const },
         bodyFont: { size: 12 },
       },
     },
     scales: {
-      y: { beginAtZero: true }
-    }
+      y: { beginAtZero: true },
+    },
   };
 
+  const makeTwoBarChart = (title: string, intake: number, recommendedValue: number) => ({
+    data: {
+      labels: [title],
+      datasets: [
+        {
+          label: "摂取",
+          backgroundColor: "rgba(54,162,235,0.8)",
+          data: [intake],
+          ...simpleBars,
+        },
+        {
+          label: "推奨",
+          backgroundColor: "rgba(75,192,192,0.75)",
+          data: [recommendedValue],
+          ...simpleBars,
+        },
+      ],
+    },
+    options: {
+      ...baseOptions,
+      plugins: {
+        ...baseOptions.plugins,
+        title: { display: true, text: `${title}比較 (${date})`, font: { size: 13, weight: "bold" as const } },
+      },
+    },
+  });
+
+  const caloriesChart = {
+    data: {
+      labels: ["カロリー(kcal)"],
+      datasets: [
+        {
+          label: "摂取",
+          backgroundColor: "rgba(54,162,235,0.8)",
+          data: [totals.calories],
+          ...simpleBars,
+        },
+        {
+          label: "運動消費",
+          backgroundColor: "rgba(255,99,132,0.75)",
+          data: [consumptionCalories ?? 0],
+          ...simpleBars,
+        },
+        {
+          label: "推奨",
+          backgroundColor: "rgba(75,192,192,0.75)",
+          data: [recommended.kcal],
+          ...simpleBars,
+        },
+      ],
+    },
+    options: {
+      ...baseOptions,
+      plugins: {
+        ...baseOptions.plugins,
+        title: { display: true, text: `カロリー比較 (${date})`, font: { size: 13, weight: "bold" as const } },
+      },
+    },
+  };
+
+  const carbsChart = makeTwoBarChart("炭水化物(g)", totals.carbs, recCarbsG);
+  const proteinChart = makeTwoBarChart("タンパク質(g)", totals.protein, recommended.protein);
+  const fatChart = makeTwoBarChart("脂質(g)", totals.fat, recFatG);
+  const saltChart = makeTwoBarChart("食塩相当量(g)", totals.salt, recommended.salt);
+
   return (
-    <div className="chart-container" style={{ maxWidth: 760 }}>
-      <div style={{ height: 240, marginBottom: 14 }}>
-        <Bar data={caloriesData} options={caloriesOptions} />
+    <div className="metric-chart-grid">
+      <div className="metric-row-top">
+        <div className="metric-panel">
+          <Bar data={caloriesChart.data} options={caloriesChart.options} />
+        </div>
+        <div className="metric-panel">
+          <Bar data={carbsChart.data} options={carbsChart.options} />
+        </div>
       </div>
-      <div style={{ height: 260 }}>
-        <Bar data={nutrientsData} options={nutrientsOptions} />
+      <div className="metric-row-bottom">
+        <div className="metric-panel">
+          <Bar data={proteinChart.data} options={proteinChart.options} />
+        </div>
+        <div className="metric-panel">
+          <Bar data={fatChart.data} options={fatChart.options} />
+        </div>
+        <div className="metric-panel">
+          <Bar data={saltChart.data} options={saltChart.options} />
+        </div>
       </div>
     </div>
   );
