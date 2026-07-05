@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import supabase from '../lib/supabase';
+import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
 import { getDRI } from '../lib/dri';
 
@@ -99,12 +99,19 @@ export default function HomePage() {
     // fetch records from Supabase
     (async () => {
       try {
+        if (!isSupabaseConfigured) {
+          setStatusMessage('Supabase が未設定です。環境変数を確認してください。');
+          return;
+        }
+
         const { data, error } = await supabase
           .from('nutrition_records')
           .select('*')
           .order('created_at', { ascending: false });
+
         if (error) {
           console.error('Supabase fetch error', error);
+          setStatusMessage('Supabase からの取得に失敗しました。');
         } else if (data) {
           const mapped = data.map((r: any) => ({
             id: r.id,
@@ -242,6 +249,11 @@ export default function HomePage() {
         description: estimate.description || null,
       } as any;
 
+      if (!isSupabaseConfigured) {
+        setStatusMessage('Supabase が未設定です。保存できません。');
+        return;
+      }
+
       const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
       if (error) {
         console.error('Supabase insert error', error);
@@ -290,6 +302,11 @@ export default function HomePage() {
       description: favorite.name,
     } as any;
     try {
+      if (!isSupabaseConfigured) {
+        setStatusMessage('Supabase が未設定です。保存できません。');
+        return;
+      }
+
       const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
       if (error) {
         console.error('Supabase insert error', error);
@@ -345,7 +362,7 @@ export default function HomePage() {
     }
     (async () => {
       try {
-        const { error } = await supabase.from('nutrition_records').delete().eq('id', id).limit(1);
+        const { error } = await supabase.from('nutrition_records').delete().eq('id', id);
         if (error) {
           console.error('Supabase delete error', error);
           setStatusMessage('削除に失敗しました。');
