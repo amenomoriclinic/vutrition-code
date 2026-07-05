@@ -32,6 +32,12 @@ export default function NutritionChart({ totals, profile, date }: Props) {
     "食塩相当量(g)",
   ];
 
+  // convert percent-based recommendations to grams using kcal
+  const fatPctAvg = ((recommended.fat_pct_min ?? 20) + (recommended.fat_pct_max ?? 30)) / 2;
+  const carbsPctAvg = ((recommended.carbs_pct_min ?? 50) + (recommended.carbs_pct_max ?? 65)) / 2;
+  const recFatG = Math.round(((recommended.kcal * (fatPctAvg / 100)) / 9) * 10) / 10;
+  const recCarbsG = Math.round(((recommended.kcal * (carbsPctAvg / 100)) / 4) * 10) / 10;
+
   const data = {
     labels,
     datasets: [
@@ -43,7 +49,7 @@ export default function NutritionChart({ totals, profile, date }: Props) {
       {
         label: "推奨",
         backgroundColor: "rgba(75,192,192,0.6)",
-        data: [recommended.kcal, recommended.protein, recommended.fat, recommended.carbs, recommended.salt],
+        data: [recommended.kcal, recommended.protein, recFatG, recCarbsG, recommended.salt],
       },
     ],
   };

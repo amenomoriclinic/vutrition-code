@@ -1,12 +1,16 @@
 {
   "male": {
-    "18-29": { "kcal": 2500, "protein": 60, "fat": 70, "carbs": 300, "salt": 8 },
-    "30-49": { "kcal": 2400, "protein": 60, "fat": 70, "carbs": 290, "salt": 8 },
-    "50-69": { "kcal": 2200, "protein": 60, "fat": 65, "carbs": 260, "salt": 8 }
+    "18-29": { "kcal": 2600, "protein": 65, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.5 },
+    "30-49": { "kcal": 2750, "protein": 65, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.5 },
+    "50-64": { "kcal": 2650, "protein": 65, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.5 },
+    "65-74": { "kcal": 2350, "protein": 60, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.0 },
+    "75+": { "kcal": 2250, "protein": 60, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.0 }
   },
   "female": {
-    "18-29": { "kcal": 2000, "protein": 50, "fat": 55, "carbs": 260, "salt": 7 },
-    "30-49": { "kcal": 1900, "protein": 50, "fat": 55, "carbs": 240, "salt": 7 },
-    "50-69": { "kcal": 1750, "protein": 50, "fat": 50, "carbs": 220, "salt": 7 }
+    "18-29": { "kcal": 1950, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.5 },
+    "30-49": { "kcal": 2050, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.5 },
+    "50-64": { "kcal": 1950, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.5 },
+    "65-74": { "kcal": 1850, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.0 },
+    "75+": { "kcal": 1750, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.0 }
   }
 }

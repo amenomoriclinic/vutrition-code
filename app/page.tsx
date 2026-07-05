@@ -433,7 +433,12 @@ export default function HomePage() {
         </div>
         <div className="summary-item">
           <span>推奨（DRI 2025 暫定）</span>
-          <strong>{recommended.kcal} kcal / P:{recommended.protein}g F:{recommended.fat}g C:{recommended.carbs}g Na:{recommended.salt}g</strong>
+          <strong>
+            {recommended.kcal} kcal / P:{recommended.protein}g 
+            F: {Math.round(((recommended.kcal * (((recommended.fat_pct_min ?? 20) + (recommended.fat_pct_max ?? 30)) / 2) / 100) / 9) * 10) / 10}g 
+            C: {Math.round(((recommended.kcal * (((recommended.carbs_pct_min ?? 50) + (recommended.carbs_pct_max ?? 65)) / 2) / 100) / 4) * 10) / 10}g 
+            Na: {recommended.salt}g
+          </strong>
         </div>
         <div className="summary-item">
           <span>必要量との差</span>
