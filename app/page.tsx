@@ -646,6 +646,14 @@ export default function HomePage() {
           <strong>{totals.salt.toFixed(1)} g</strong>
         </div>
         <div className="summary-item">
+          <span>基礎代謝の目安</span>
+          <strong>{(profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight).toFixed(0)} kcal</strong>
+        </div>
+        <div className="summary-item">
+          <span>運動による消費カロリー</span>
+          <strong>{exerciseCalories.toFixed(0)} kcal</strong>
+        </div>
+        <div className="summary-item">
           <span>推定エネルギー必要量</span>
           <strong>{estimatedEnergy.toFixed(0)} kcal</strong>
         </div>
@@ -663,11 +671,7 @@ export default function HomePage() {
           <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
         </div>
         <div className="chart-wrapper">
-          {(() => {
-            const bmr = profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight;
-            const consumptionTotal = Math.round(bmr + exerciseCalories);
-            return <NutritionChart totals={totals} profile={profile} consumptionCalories={consumptionTotal} date={dateFilter} />;
-          })()}
+          <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} date={dateFilter} />
         </div>
       </div>
 

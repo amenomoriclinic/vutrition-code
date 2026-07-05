@@ -43,18 +43,18 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
     labels,
     datasets: [
       {
-        label: "実績",
-        backgroundColor: "rgba(54,162,235,0.7)",
+        label: "摂取カロリー・摂取量",
+        backgroundColor: "rgba(54,162,235,0.8)",
         data: [totals.calories, totals.protein, totals.fat, totals.carbs, totals.salt],
       },
       {
-        label: "消費",
-        backgroundColor: "rgba(255,99,132,0.6)",
+        label: "運動による消費カロリー",
+        backgroundColor: "rgba(255,99,132,0.75)",
         data: [consumptionCalories ?? 0, 0, 0, 0, 0],
       },
       {
-        label: "推奨",
-        backgroundColor: "rgba(75,192,192,0.6)",
+        label: "推奨摂取量（DRI 2025）",
+        backgroundColor: "rgba(75,192,192,0.75)",
         data: [recommended.kcal, recommended.protein, recFatG, recCarbsG, recommended.salt],
       },
     ],
@@ -64,8 +64,23 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { position: "top" as const },
-      title: { display: true, text: `日次栄養比較 (${date})` },
+      legend: {
+        position: "top" as const,
+        labels: {
+          boxWidth: 18,
+          boxHeight: 18,
+          padding: 18,
+          font: {
+            size: 14,
+            weight: "bold" as const,
+          },
+        },
+      },
+      title: { display: true, text: `日次栄養比較 (${date})`, font: { size: 16, weight: "bold" as const } },
+      tooltip: {
+        titleFont: { size: 14, weight: "bold" as const },
+        bodyFont: { size: 13 },
+      },
     },
     scales: {
       y: { beginAtZero: true }
