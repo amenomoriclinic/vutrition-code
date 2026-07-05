@@ -139,11 +139,11 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
   return (
     <div className="metric-chart-grid">
       <div className="metric-row-1">
-        <div className="metric-panel metric-panel-calories">
+        <div className="metric-panel">
           <Bar data={caloriesChart.data} options={caloriesChart.options} />
-          <small className="metric-legend-note">判定: 青=橙で維持 / 青&gt;橙で増 / 青&lt;橙で減</small>
         </div>
       </div>
+      <small className="metric-legend-note">判定: 青=橙で維持 / 青&gt;橙で増 / 青&lt;橙で減</small>
       <div className="metric-row-2">
         <div className="metric-panel">
           <Bar data={carbsChart.data} options={carbsChart.options} />
