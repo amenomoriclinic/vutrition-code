@@ -67,6 +67,7 @@ export default function HomePage() {
   const [scanMode, setScanMode] = useState<'food' | 'label'>('food');
   const [consumedGrams, setConsumedGrams] = useState(100);
   const [quantityMultiplier, setQuantityMultiplier] = useState(1);
+  const [exerciseTab, setExerciseTab] = useState<'run' | 'manual' | 'met'>('run');
   const [estimate, setEstimate] = useState<NutritionEstimate | null>(null);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
@@ -422,13 +423,13 @@ export default function HomePage() {
       <div className="page-card">
         <h2 className="section-title">写真から栄養推定</h2>
         <div className="field-grid">
-          <label>
-            読み取りモード
-            <div className="mode-options">
-              <label><input type="radio" name="scanMode" value="food" checked={scanMode === 'food'} onChange={() => setScanMode('food')} /> 通常の料理写真</label>
-              <label><input type="radio" name="scanMode" value="label" checked={scanMode === 'label'} onChange={() => setScanMode('label')} /> パッケージ栄養表示を読む</label>
+          <div>
+            <div style={{display:'flex', gap:8, marginBottom:8}}>
+              <button type="button" onClick={() => setScanMode('food')} style={{padding:8, borderRadius:6, background: scanMode==='food' ? '#0b74de' : '#eee', color: scanMode==='food' ? '#fff' : '#000'}}>料理写真</button>
+              <button type="button" onClick={() => setScanMode('label')} style={{padding:8, borderRadius:6, background: scanMode==='label' ? '#0b74de' : '#eee', color: scanMode==='label' ? '#fff' : '#000'}}>栄養表示ラベル</button>
             </div>
-          </label>
+            <small>{scanMode==='food' ? '料理全体を撮影して栄養推定します。' : 'パッケージの栄養表示を撮影して数値を読み取ります。'}</small>
+          </div>
           <label>
             写真
             <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} />
@@ -484,8 +485,15 @@ export default function HomePage() {
               <input type="number" step="0.1" value={estimate.salt} onChange={(e) => setEstimate({ ...estimate, salt: Number(e.target.value) })} />
             </label>
             <label>
-              量の倍率 (例: 0.5 = 半分, 2 = 2倍, 3 = 3個)
-              <input type="number" step="0.1" min="0.1" value={quantityMultiplier} onChange={(e) => setQuantityMultiplier(Number(e.target.value))} />
+              量の倍率
+              <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                <div style={{display:'flex', gap:6}}>
+                  {[0.5,1,1.5,2].map((v) => (
+                    <button key={v} type="button" onClick={() => setQuantityMultiplier(v)} style={{padding:'6px 10px', borderRadius:6, background: quantityMultiplier===v ? '#0b74de' : '#eee', color: quantityMultiplier===v ? '#fff' : '#000'}}>{v}x</button>
+                  ))}
+                </div>
+                <input type="number" step="0.1" min="0.1" value={quantityMultiplier} onChange={(e) => setQuantityMultiplier(Number(e.target.value))} style={{width:100}} />
+              </div>
             </label>
           </div>
           <button className="button-primary" type="button" onClick={saveRecord}>
@@ -494,77 +502,69 @@ export default function HomePage() {
         </div>
       ) : null}
 
-      <div className="page-card">
+        <div className="page-card">
         <h2 className="section-title">運動記録</h2>
-        <div className="field-grid">
-          <label>
-            ランニング距離 (km)
-            <input id="run-km" type="number" step="0.1" min="0" defaultValue={0} />
-          </label>
-          <button className="button-secondary" onClick={async () => {
-            const el = document.getElementById('run-km') as HTMLInputElement | null;
-            const km = el ? Number(el.value) : 0;
-            if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
-            const caloriesBurned = Math.round(profile.weight * km * 1.036);
-            const insert = { name: `ランニング ${km} km`, calories: caloriesBurned, protein: 0, fat:0, carbs:0, salt:0, source: 'exercise', description: null } as any;
-            if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-            const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
-            if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-            if (data && data[0]) {
-              const r = data[0];
-              setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]);
-              setStatusMessage('ランニング記録を保存しました。');
-            }
-          }}>ランニング記録</button>
-
-          <label>
-            手動消費カロリー(kcal)
-            <input id="manual-cal" type="number" step="1" min="0" defaultValue={0} />
-          </label>
-          <button className="button-secondary" onClick={async () => {
-            const el = document.getElementById('manual-cal') as HTMLInputElement | null;
-            const kcal = el ? Math.round(Number(el.value)) : 0;
-            if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
-            const insert = { name: `運動（手動）`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:null } as any;
-            if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-            const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
-            if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-            if (data && data[0]) {
-              const r = data[0];
-              setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]);
-              setStatusMessage('運動記録を保存しました。');
-            }
-          }}>手動記録</button>
-
-          <label>
-            筋トレ(MET 値と時間)
-            <div style={{display:'flex',gap:8}}>
-              <select id="met-select">
-                <option value="3.5">筋力トレーニング(軽め) - MET 3.5</option>
-                <option value="6.0">筋力トレーニング(強め) - MET 6.0</option>
-                <option value="7.0">高強度筋トレ - MET 7.0</option>
-              </select>
-              <input id="met-min" type="number" defaultValue={30} min={1} />
+        <div style={{display:'flex', gap:8, marginBottom:8}}>
+          <button type="button" onClick={() => setExerciseTab('run')} style={{padding:8, borderRadius:6, background: exerciseTab==='run' ? '#0b74de' : '#eee', color: exerciseTab==='run' ? '#fff' : '#000'}}>ランニング</button>
+          <button type="button" onClick={() => setExerciseTab('manual')} style={{padding:8, borderRadius:6, background: exerciseTab==='manual' ? '#0b74de' : '#eee', color: exerciseTab==='manual' ? '#fff' : '#000'}}>手動</button>
+          <button type="button" onClick={() => setExerciseTab('met')} style={{padding:8, borderRadius:6, background: exerciseTab==='met' ? '#0b74de' : '#eee', color: exerciseTab==='met' ? '#fff' : '#000'}}>筋トレ</button>
+        </div>
+        <div>
+          {exerciseTab === 'run' && (
+            <div style={{display:'flex', gap:8, alignItems:'center'}}>
+              <input id="run-km" type="number" step="0.1" min="0" defaultValue={0} style={{width:120}} />
+              <button className="button-secondary" onClick={async () => {
+                const el = document.getElementById('run-km') as HTMLInputElement | null;
+                const km = el ? Number(el.value) : 0;
+                if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
+                const caloriesBurned = Math.round(profile.weight * km * 1.036);
+                const insert = { name: `ランニング ${km} km`, calories: caloriesBurned, protein: 0, fat:0, carbs:0, salt:0, source: 'exercise', description: null } as any;
+                if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
+                const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+                if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]); setStatusMessage('ランニング記録を保存しました。'); }
+              }}>保存</button>
             </div>
-          </label>
-          <button className="button-secondary" onClick={async () => {
-            const metEl = document.getElementById('met-select') as HTMLSelectElement | null;
-            const minEl = document.getElementById('met-min') as HTMLInputElement | null;
-            const met = metEl ? Number(metEl.value) : 0;
-            const min = minEl ? Number(minEl.value) : 0;
-            if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
-            const hours = min / 60;
-            const kcal = Math.round(met * profile.weight * hours);
-            const insert = { name: `筋トレ ${min}分`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:`MET ${met}` } as any;
-            if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-            const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
-            if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-            if (data && data[0]) {
-              const r = data[0];
-              setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10): new Date().toISOString().slice(0,10), source:'exercise' }, ...records]);
-              setStatusMessage('筋トレ記録を保存しました。');
-            }
-          }}>筋トレ記録</button>
+          )}
+          {exerciseTab === 'manual' && (
+            <div style={{display:'flex', gap:8, alignItems:'center'}}>
+              <input id="manual-cal" type="number" step="1" min="0" defaultValue={0} style={{width:120}} />
+              <button className="button-secondary" onClick={async () => {
+                const el = document.getElementById('manual-cal') as HTMLInputElement | null;
+                const kcal = el ? Math.round(Number(el.value)) : 0;
+                if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
+                const insert = { name: `運動（手動）`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:null } as any;
+                if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
+                const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+                if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]); setStatusMessage('運動記録を保存しました。'); }
+              }}>保存</button>
+            </div>
+          )}
+          {exerciseTab === 'met' && (
+            <div style={{display:'flex', gap:8, alignItems:'center'}}>
+              <select id="met-select">
+                <option value="3.5">軽め - MET 3.5</option>
+                <option value="6.0">強め - MET 6.0</option>
+                <option value="7.0">高強度 - MET 7.0</option>
+              </select>
+              <input id="met-min" type="number" defaultValue={30} min={1} style={{width:80}} />
+              <button className="button-secondary" onClick={async () => {
+                const metEl = document.getElementById('met-select') as HTMLSelectElement | null;
+                const minEl = document.getElementById('met-min') as HTMLInputElement | null;
+                const met = metEl ? Number(metEl.value) : 0;
+                const min = minEl ? Number(minEl.value) : 0;
+                if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
+                const hours = min / 60;
+                const kcal = Math.round(met * profile.weight * hours);
+                const insert = { name: `筋トレ ${min}分`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:`MET ${met}` } as any;
+                if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
+                const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+                if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10): new Date().toISOString().slice(0,10), source:'exercise' }, ...records]); setStatusMessage('筋トレ記録を保存しました。'); }
+              }}>保存</button>
+            </div>
+          )}
         </div>
       </div>
 
