@@ -678,7 +678,7 @@ export default function HomePage() {
         </div>
         <div className="card-row">
           {favorites.map((favorite) => (
-            <div key={favorite.id} style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+            <div key={favorite.id} className="favorite-item">
               <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
                 {favorite.name}
               </button>

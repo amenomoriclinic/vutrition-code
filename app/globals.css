@@ -74,6 +74,24 @@ main {
   gap: 12px;
 }
 
+.favorite-item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.favorite-item .button-small {
+  padding: 7px 12px;
+  font-size: 0.85rem;
+}
+
+.favorite-item .button-danger {
+  padding: 6px 10px;
+  min-width: auto;
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
 .button-primary,
 .button-secondary,
 .button-small {
@@ -229,6 +247,9 @@ small {
 
   .button-danger {
     width: 100%;
+  }
+  .favorite-item .button-danger {
+    width: auto;
   }
   .chart-container {
     min-height: 900px;
