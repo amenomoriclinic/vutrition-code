@@ -38,6 +38,17 @@ type FavoriteFood = {
 };
 
 const isExerciseSource = (source: unknown) => String(source ?? '').trim().toLowerCase() === 'exercise';
+const JST_OFFSET_MINUTES = 9 * 60;
+
+const toJstDateString = (input?: string | Date | null) => {
+  const d = input ? new Date(input) : new Date();
+  const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+  const jst = new Date(utcMs + JST_OFFSET_MINUTES * 60000);
+  const y = jst.getFullYear();
+  const m = String(jst.getMonth() + 1).padStart(2, '0');
+  const day = String(jst.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
 const isValidFavorite = (v: any): v is FavoriteFood => {
   return !!v && typeof v.id === 'string' && typeof v.name === 'string';
@@ -121,7 +132,7 @@ export default function HomePage() {
   const [records, setRecords] = useState<NutritionRecord[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
   const [profile, setProfile] = useState({ age: 35, sex: 'male' as Sex, weight: 60, activity: 'moderate' as ActivityLevel });
-  const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFilter, setDateFilter] = useState(toJstDateString());
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [favoriteName, setFavoriteName] = useState('');
@@ -194,7 +205,7 @@ export default function HomePage() {
             salt: Number(r.salt) || 0,
             description: r.description || '',
             imageUrl: r.image_url || undefined,
-            createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
+            createdAt: toJstDateString(r.created_at),
             source: (String(r.source || 'photo').toLowerCase() as NutritionRecord['source']),
           }));
           setRecords(mapped as NutritionRecord[]);
@@ -383,7 +394,7 @@ export default function HomePage() {
           salt: Number(r.salt) || estimate.salt,
           description: r.description || estimate.description,
           imageUrl: r.image_url || undefined,
-          createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
+          createdAt: toJstDateString(r.created_at),
           source: r.source || 'photo',
         };
         setRecords([record, ...records]);
@@ -436,7 +447,7 @@ export default function HomePage() {
           salt: Number(r.salt) || favorite.salt,
           description: r.description || favorite.name,
           imageUrl: r.image_url || undefined,
-          createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
+          createdAt: toJstDateString(r.created_at),
           source: r.source || 'favorite',
         };
         setRecords([record, ...records]);
@@ -607,7 +618,7 @@ export default function HomePage() {
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
                 const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
                 if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]); setStatusMessage('ランニング記録を保存しました。'); }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), source:'exercise' }, ...records]); setStatusMessage('ランニング記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
@@ -622,7 +633,7 @@ export default function HomePage() {
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
                 const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
                 if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]); setStatusMessage('運動記録を保存しました。'); }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), source:'exercise' }, ...records]); setStatusMessage('運動記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
@@ -646,7 +657,7 @@ export default function HomePage() {
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
                 const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
                 if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10): new Date().toISOString().slice(0,10), source:'exercise' }, ...records]); setStatusMessage('筋トレ記録を保存しました。'); }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), source:'exercise' }, ...records]); setStatusMessage('筋トレ記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
