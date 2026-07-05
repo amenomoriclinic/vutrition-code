@@ -54,6 +54,36 @@ const defaultFavorites: FavoriteFood[] = [
     carbs: 42.0,
     salt: 0.6,
   },
+  {
+    id: 'inoras-125-200',
+    name: 'イノラス 125mL（200kcal）',
+    amountText: '125mL',
+    calories: 200,
+    protein: 8.8,
+    fat: 5.6,
+    carbs: 28.4,
+    salt: 0.68,
+  },
+  {
+    id: 'soy-sauce-tsp1',
+    name: '醤油 小さじ1',
+    amountText: '小さじ1',
+    calories: 4,
+    protein: 0.4,
+    fat: 0,
+    carbs: 0.5,
+    salt: 0.9,
+  },
+  {
+    id: 'mayo-tbsp1',
+    name: 'マヨネーズ 大さじ1',
+    amountText: '大さじ1',
+    calories: 100,
+    protein: 0.4,
+    fat: 11,
+    carbs: 0.4,
+    salt: 0.2,
+  },
 ];
 
 const activityLabels: Record<ActivityLevel, string> = {
