@@ -54,8 +54,18 @@ main {
 
 .profile-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.profile-grid label {
+  font-size: 0.85rem;
+}
+
+.profile-grid input,
+.profile-grid select {
+  padding: 8px 10px;
+  font-size: 0.92rem;
 }
 
 .card-row {
@@ -169,7 +179,7 @@ small {
 
 @media (max-width: 720px) {
   .profile-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .record-actions {
