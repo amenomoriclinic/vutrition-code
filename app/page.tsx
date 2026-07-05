@@ -689,7 +689,7 @@ export default function HomePage() {
         </div>
         <p><small>グラフの赤い棒は運動記録に入力した消費カロリーのみで、基礎代謝は含みません。</small></p>
         <div className="chart-wrapper">
-          <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} date={dateFilter} />
+          <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} totalConsumptionCalories={totalConsumptionCalories} date={dateFilter} />
         </div>
       </div>
 

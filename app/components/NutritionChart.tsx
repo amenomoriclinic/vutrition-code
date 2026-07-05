@@ -19,10 +19,11 @@ type Props = {
   totals: { calories: number; protein: number; fat: number; carbs: number; salt: number };
   profile: { age: number; sex: string; weight: number; activity: string };
   consumptionCalories?: number;
+  totalConsumptionCalories?: number;
   date: string;
 };
 
-export default function NutritionChart({ totals, profile, consumptionCalories, date }: Props) {
+export default function NutritionChart({ totals, profile, consumptionCalories, totalConsumptionCalories, date }: Props) {
   const recommended = useMemo(() => getDRI(profile as any), [profile]);
 
   const fatPctAvg = ((recommended.fat_pct_min ?? 20) + (recommended.fat_pct_max ?? 30)) / 2;
@@ -96,21 +97,27 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
       labels: ["カロリー(kcal)"],
       datasets: [
         {
-          label: "摂取",
+          label: "摂取カロリー（青）",
           backgroundColor: "rgba(54,162,235,0.8)",
           data: [totals.calories],
           ...simpleBars,
         },
         {
-          label: "運動消費",
+          label: "運動消費（ピンク）",
           backgroundColor: "rgba(255,99,132,0.75)",
           data: [consumptionCalories ?? 0],
           ...simpleBars,
         },
         {
-          label: "推奨",
+          label: "DRI推奨摂取（緑）",
           backgroundColor: "rgba(75,192,192,0.75)",
           data: [recommended.kcal],
+          ...simpleBars,
+        },
+        {
+          label: "総消費（オレンジ）: 青=橙で維持 / 青>橙で増 / 青<橙で減",
+          backgroundColor: "rgba(245,158,11,0.85)",
+          data: [totalConsumptionCalories ?? 0],
           ...simpleBars,
         },
       ],
