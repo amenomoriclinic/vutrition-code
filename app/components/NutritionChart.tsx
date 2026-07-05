@@ -18,10 +18,11 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 type Props = {
   totals: { calories: number; protein: number; fat: number; carbs: number; salt: number };
   profile: { age: number; sex: string; weight: number; activity: string };
+  consumptionCalories?: number;
   date: string;
 };
 
-export default function NutritionChart({ totals, profile, date }: Props) {
+export default function NutritionChart({ totals, profile, consumptionCalories, date }: Props) {
   const recommended = useMemo(() => getDRI(profile as any), [profile]);
 
   const labels = [
@@ -45,6 +46,11 @@ export default function NutritionChart({ totals, profile, date }: Props) {
         label: "実績",
         backgroundColor: "rgba(54,162,235,0.7)",
         data: [totals.calories, totals.protein, totals.fat, totals.carbs, totals.salt],
+      },
+      {
+        label: "消費",
+        backgroundColor: "rgba(255,99,132,0.6)",
+        data: [consumptionCalories ?? 0, 0, 0, 0, 0],
       },
       {
         label: "推奨",

@@ -66,6 +66,7 @@ export default function HomePage() {
   const [description, setDescription] = useState('');
   const [scanMode, setScanMode] = useState<'food' | 'label'>('food');
   const [consumedGrams, setConsumedGrams] = useState(100);
+  const [quantityMultiplier, setQuantityMultiplier] = useState(1);
   const [estimate, setEstimate] = useState<NutritionEstimate | null>(null);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
@@ -151,23 +152,31 @@ export default function HomePage() {
   }, [records, dateFilter]);
 
   const totals = useMemo(() => {
+    // intake totals only (exclude exercise records)
     return filteredRecords.reduce(
       (acc, record) => {
-        acc.calories += record.calories;
-        acc.protein += record.protein;
-        acc.fat += record.fat;
-        acc.carbs += record.carbs;
-        acc.salt += record.salt;
+        if (record.source !== 'exercise') {
+          acc.calories += record.calories;
+          acc.protein += record.protein;
+          acc.fat += record.fat;
+          acc.carbs += record.carbs;
+          acc.salt += record.salt;
+        }
         return acc;
       },
       { calories: 0, protein: 0, fat: 0, carbs: 0, salt: 0 }
     );
   }, [filteredRecords]);
 
+  const exerciseCalories = useMemo(() => {
+    return filteredRecords.reduce((acc, record) => (record.source === 'exercise' ? acc + (record.calories || 0) : acc), 0);
+  }, [filteredRecords]);
+
   const recommended = useMemo(() => getDRI(profile), [profile]);
 
   const estimatedEnergy = useMemo(() => {
-    const base = profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight;
+    // estimated daily energy requirement (simple PAL model)
+    const base = profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight; // basal ~ kcal/day
     const pal = profile.activity === 'low' ? 1.4 : profile.activity === 'high' ? 1.75 : 1.55;
     return Math.round(base * pal);
   }, [profile]);
@@ -261,14 +270,15 @@ export default function HomePage() {
     if (!estimate) return;
     setLoading(true);
     try {
+      const scale = Number(quantityMultiplier) || 1;
       const insert = {
         name: estimate.name,
         amount_text: estimate.amountText,
-        calories: estimate.calories,
-        protein: estimate.protein,
-        fat: estimate.fat,
-        carbs: estimate.carbs,
-        salt: estimate.salt,
+        calories: Math.round((estimate.calories || 0) * scale * 10) / 10,
+        protein: Math.round((estimate.protein || 0) * scale * 10) / 10,
+        fat: Math.round((estimate.fat || 0) * scale * 10) / 10,
+        carbs: Math.round((estimate.carbs || 0) * scale * 10) / 10,
+        salt: Math.round((estimate.salt || 0) * scale * 10) / 10,
         source: 'photo',
         description: estimate.description || null,
       } as any;
@@ -441,7 +451,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      {estimate ? (
+        {estimate ? (
         <div className="page-card">
           <h2 className="section-title">推定結果の確認と修正</h2>
           <div className="field-grid field-grid-2">
@@ -473,12 +483,90 @@ export default function HomePage() {
               食塩相当量(g)
               <input type="number" step="0.1" value={estimate.salt} onChange={(e) => setEstimate({ ...estimate, salt: Number(e.target.value) })} />
             </label>
+            <label>
+              量の倍率 (例: 0.5 = 半分, 2 = 2倍, 3 = 3個)
+              <input type="number" step="0.1" min="0.1" value={quantityMultiplier} onChange={(e) => setQuantityMultiplier(Number(e.target.value))} />
+            </label>
           </div>
           <button className="button-primary" type="button" onClick={saveRecord}>
             記録として保存する
           </button>
         </div>
       ) : null}
+
+      <div className="page-card">
+        <h2 className="section-title">運動記録</h2>
+        <div className="field-grid">
+          <label>
+            ランニング距離 (km)
+            <input id="run-km" type="number" step="0.1" min="0" defaultValue={0} />
+          </label>
+          <button className="button-secondary" onClick={async () => {
+            const el = document.getElementById('run-km') as HTMLInputElement | null;
+            const km = el ? Number(el.value) : 0;
+            if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
+            const caloriesBurned = Math.round(profile.weight * km * 1.036);
+            const insert = { name: `ランニング ${km} km`, calories: caloriesBurned, protein: 0, fat:0, carbs:0, salt:0, source: 'exercise', description: null } as any;
+            if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
+            const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+            if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
+            if (data && data[0]) {
+              const r = data[0];
+              setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]);
+              setStatusMessage('ランニング記録を保存しました。');
+            }
+          }}>ランニング記録</button>
+
+          <label>
+            手動消費カロリー(kcal)
+            <input id="manual-cal" type="number" step="1" min="0" defaultValue={0} />
+          </label>
+          <button className="button-secondary" onClick={async () => {
+            const el = document.getElementById('manual-cal') as HTMLInputElement | null;
+            const kcal = el ? Math.round(Number(el.value)) : 0;
+            if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
+            const insert = { name: `運動（手動）`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:null } as any;
+            if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
+            const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+            if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
+            if (data && data[0]) {
+              const r = data[0];
+              setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10):new Date().toISOString().slice(0,10), source:'exercise' }, ...records]);
+              setStatusMessage('運動記録を保存しました。');
+            }
+          }}>手動記録</button>
+
+          <label>
+            筋トレ(MET 値と時間)
+            <div style={{display:'flex',gap:8}}>
+              <select id="met-select">
+                <option value="3.5">筋力トレーニング(軽め) - MET 3.5</option>
+                <option value="6.0">筋力トレーニング(強め) - MET 6.0</option>
+                <option value="7.0">高強度筋トレ - MET 7.0</option>
+              </select>
+              <input id="met-min" type="number" defaultValue={30} min={1} />
+            </div>
+          </label>
+          <button className="button-secondary" onClick={async () => {
+            const metEl = document.getElementById('met-select') as HTMLSelectElement | null;
+            const minEl = document.getElementById('met-min') as HTMLInputElement | null;
+            const met = metEl ? Number(metEl.value) : 0;
+            const min = minEl ? Number(minEl.value) : 0;
+            if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
+            const hours = min / 60;
+            const kcal = Math.round(met * profile.weight * hours);
+            const insert = { name: `筋トレ ${min}分`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:`MET ${met}` } as any;
+            if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
+            const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+            if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
+            if (data && data[0]) {
+              const r = data[0];
+              setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: r.created_at? new Date(r.created_at).toISOString().slice(0,10): new Date().toISOString().slice(0,10), source:'exercise' }, ...records]);
+              setStatusMessage('筋トレ記録を保存しました。');
+            }
+          }}>筋トレ記録</button>
+        </div>
+      </div>
 
       <div className="page-card">
         <h2 className="section-title">マイ定番食品</h2>
@@ -575,7 +663,11 @@ export default function HomePage() {
           <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
         </div>
         <div className="chart-wrapper">
-          <NutritionChart totals={totals} profile={profile} date={dateFilter} />
+          {(() => {
+            const bmr = profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight;
+            const consumptionTotal = Math.round(bmr + exerciseCalories);
+            return <NutritionChart totals={totals} profile={profile} consumptionCalories={consumptionTotal} date={dateFilter} />;
+          })()}
         </div>
       </div>
 
