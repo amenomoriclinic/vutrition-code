@@ -37,6 +37,8 @@ type FavoriteFood = {
   salt: number;
 };
 
+const isExerciseSource = (source: unknown) => String(source ?? '').trim().toLowerCase() === 'exercise';
+
 const STORAGE_RECORDS = 'nutrition_records';
 const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
@@ -156,7 +158,7 @@ export default function HomePage() {
     // intake totals only (exclude exercise records)
     return filteredRecords.reduce(
       (acc, record) => {
-        if (String(record.source).toLowerCase() !== 'exercise') {
+        if (!isExerciseSource(record.source)) {
           acc.calories += record.calories;
           acc.protein += record.protein;
           acc.fat += record.fat;
@@ -171,7 +173,7 @@ export default function HomePage() {
 
   const exerciseCalories = useMemo(() => {
     return filteredRecords.reduce(
-      (acc, record) => (String(record.source).toLowerCase() === 'exercise' ? acc + (record.calories || 0) : acc),
+      (acc, record) => (isExerciseSource(record.source) ? acc + (record.calories || 0) : acc),
       0
     );
   }, [filteredRecords]);

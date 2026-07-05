@@ -36,16 +36,28 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
       {
         label: "摂取カロリー",
         backgroundColor: "rgba(54,162,235,0.8)",
+        barThickness: 20,
+        maxBarThickness: 24,
+        categoryPercentage: 0.5,
+        barPercentage: 0.7,
         data: [totals.calories],
       },
       {
         label: "運動による消費カロリー",
         backgroundColor: "rgba(255,99,132,0.75)",
+        barThickness: 20,
+        maxBarThickness: 24,
+        categoryPercentage: 0.5,
+        barPercentage: 0.7,
         data: [consumptionCalories ?? 0],
       },
       {
         label: "DRI 2025による推奨摂取カロリー",
         backgroundColor: "rgba(75,192,192,0.75)",
+        barThickness: 20,
+        maxBarThickness: 24,
+        categoryPercentage: 0.5,
+        barPercentage: 0.7,
         data: [recommended.kcal],
       },
     ],
@@ -57,11 +69,19 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
       {
         label: "摂取量",
         backgroundColor: "rgba(54,162,235,0.8)",
+        barThickness: 18,
+        maxBarThickness: 22,
+        categoryPercentage: 0.5,
+        barPercentage: 0.7,
         data: [totals.protein, totals.fat, totals.carbs, totals.salt],
       },
       {
         label: "推奨量（DRI 2025）",
         backgroundColor: "rgba(75,192,192,0.75)",
+        barThickness: 18,
+        maxBarThickness: 22,
+        categoryPercentage: 0.5,
+        barPercentage: 0.7,
         data: [recommended.protein, recFatG, recCarbsG, recommended.salt],
       },
     ],
@@ -122,11 +142,11 @@ export default function NutritionChart({ totals, profile, consumptionCalories, d
   };
 
   return (
-    <div className="chart-container" style={{ maxWidth: 900 }}>
-      <div style={{ height: 280, marginBottom: 20 }}>
+    <div className="chart-container" style={{ maxWidth: 760 }}>
+      <div style={{ height: 240, marginBottom: 14 }}>
         <Bar data={caloriesData} options={caloriesOptions} />
       </div>
-      <div style={{ height: 320 }}>
+      <div style={{ height: 260 }}>
         <Bar data={nutrientsData} options={nutrientsOptions} />
       </div>
     </div>
