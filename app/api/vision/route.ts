@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 
-const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CLAUDE_API_URL = process.env.CLAUDE_API_URL ?? 'https://api.anthropic.com/v1/responses';
 
 export async function POST(request: Request) {
-  if (!CLAUDE_API_KEY) {
-    return NextResponse.json({ error: 'CLAUDE_API_KEY is not configured on the server.' }, { status: 500 });
+  if (!ANTHROPIC_API_KEY) {
+    return NextResponse.json({ error: 'ANTHROPIC_API_KEY is not configured on the server.' }, { status: 500 });
   }
 
   const formData = await request.formData();
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${CLAUDE_API_KEY}`,
+      Authorization: `Bearer ${ANTHROPIC_API_KEY}`,
     },
     body: JSON.stringify(body),
   });
