@@ -214,22 +214,7 @@ export default function HomePage() {
       source: 'photo',
     };
     setRecords([record, ...records]);
-    // Google Sheets に保存（失敗してもアプリは継続）
-    try {
-      fetch('/api/sheets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          timestamp: new Date().toISOString(),
-          name: record.name,
-          calories: record.calories,
-          protein: record.protein,
-          fat: record.fat,
-          carbs: record.carbs,
-          salt: record.salt,
-        }),
-      }).catch(() => {});
-    } catch {}
+    // ローカルのみで保存（Sheets 連携は無効化）
     setEstimate(null);
     setPhotoFile(null);
     setPhotoPreview('');
@@ -246,21 +231,7 @@ export default function HomePage() {
       source: 'favorite',
     };
     setRecords([record, ...records]);
-    try {
-      fetch('/api/sheets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          timestamp: new Date().toISOString(),
-          name: record.name,
-          calories: record.calories,
-          protein: record.protein,
-          fat: record.fat,
-          carbs: record.carbs,
-          salt: record.salt,
-        }),
-      }).catch(() => {});
-    } catch {}
+    // Sheets 連携は無効のため何もしない
     setStatusMessage(`${favorite.name} を記録しました。`);
   };
 
