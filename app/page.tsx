@@ -49,6 +49,7 @@ type PendingFood = {
 type NutritionRecord = NutritionEstimate & {
   id: string;
   createdAt: string;
+  multiplier: number;
   source: 'photo' | 'favorite' | 'exercise';
 };
 
@@ -174,6 +175,7 @@ export default function HomePage() {
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
+  const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
@@ -244,6 +246,7 @@ export default function HomePage() {
             description: r.description || '',
             imageUrl: r.image_url || undefined,
             createdAt: toJstDateString(r.created_at),
+            multiplier: Number(r.multiplier) || 1,
             source: (String(r.source || 'photo').toLowerCase() as NutritionRecord['source']),
           }));
           setRecords(mapped as NutritionRecord[]);
@@ -522,6 +525,7 @@ export default function HomePage() {
         fat: round1(target.fat),
         carbs: round1(target.carbs),
         salt: round1(target.salt),
+        multiplier: round1((target.quantity || 1) * (target.multiplier || 1)),
         source: 'photo',
         description: target.description || null,
       } as any));
@@ -548,6 +552,7 @@ export default function HomePage() {
           description: r.description || '',
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
+          multiplier: Number(r.multiplier) || 1,
           source: (r.source || 'photo') as NutritionRecord['source'],
         }));
         setRecords((prev) => [...created, ...prev]);
@@ -579,6 +584,7 @@ export default function HomePage() {
       fat: favorite.fat,
       carbs: favorite.carbs,
       salt: favorite.salt,
+      multiplier: 1,
       source: 'favorite',
       description: favorite.name,
     } as any;
@@ -606,6 +612,7 @@ export default function HomePage() {
           description: r.description || favorite.name,
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
+          multiplier: Number(r.multiplier) || 1,
           source: r.source || 'favorite',
         };
         setRecords([record, ...records]);
@@ -664,6 +671,92 @@ export default function HomePage() {
         setStatusMessage('削除中にエラーが発生しました。');
       }
     })();
+  };
+
+  const applyMultiplierToRecord = (record: NutritionRecord, nextMultiplier: number): NutritionRecord => {
+    const prevMultiplier = Math.max(0.1, Number(record.multiplier) || 1);
+    const safeMultiplier = Math.max(0.1, Number(nextMultiplier) || 1);
+    const ratio = safeMultiplier / prevMultiplier;
+    return {
+      ...record,
+      multiplier: safeMultiplier,
+      calories: round1(record.calories * ratio),
+      protein: round1(record.protein * ratio),
+      fat: round1(record.fat * ratio),
+      carbs: round1(record.carbs * ratio),
+      salt: round1(record.salt * ratio),
+    };
+  };
+
+  const updateRecordMultiplier = async (id: string, value: number) => {
+    const nextMultiplier = Math.max(0.1, Number(value) || 1);
+    let previousRecord: NutritionRecord | undefined;
+    let updatedRecord: NutritionRecord | undefined;
+
+    setRecords((prev) => prev.map((record) => {
+      if (record.id !== id) return record;
+      previousRecord = record;
+      updatedRecord = applyMultiplierToRecord(record, nextMultiplier);
+      return updatedRecord;
+    }));
+
+    if (!updatedRecord) {
+      return;
+    }
+
+    if (!isSupabaseConfigured) {
+      setStatusMessage('Supabase が未設定です。倍率を保存できません。');
+      return;
+    }
+
+    const payload = {
+      calories: updatedRecord.calories,
+      protein: updatedRecord.protein,
+      fat: updatedRecord.fat,
+      carbs: updatedRecord.carbs,
+      salt: updatedRecord.salt,
+      multiplier: updatedRecord.multiplier,
+    };
+
+    const { error } = await supabase.from('nutrition_records').update(payload).eq('id', id);
+    if (error) {
+      console.error('Supabase multiplier update error', error);
+      if (previousRecord) {
+        setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
+      }
+      setStatusMessage('倍率の保存に失敗しました。');
+    }
+  };
+
+  const handleRecordMultiplierInput = (id: string, rawValue: string) => {
+    setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
+
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+
+    const safeMultiplier = Math.max(0.1, parsed);
+    setRecords((prev) => prev.map((record) => {
+      if (record.id !== id) return record;
+      return applyMultiplierToRecord(record, safeMultiplier);
+    }));
+  };
+
+  const commitRecordMultiplier = async (id: string) => {
+    const rawValue = recordMultiplierDrafts[id];
+    if (rawValue === undefined) {
+      return;
+    }
+
+    const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
+    await updateRecordMultiplier(id, nextMultiplier);
+
+    setRecordMultiplierDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   return (
@@ -872,11 +965,11 @@ export default function HomePage() {
                 const km = el ? Number(el.value) : 0;
                 if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
                 const caloriesBurned = Math.round(profile.weight * km * 1.036);
-                const insert = { name: `ランニング ${km} km`, calories: caloriesBurned, protein: 0, fat:0, carbs:0, salt:0, source: 'exercise', description: null } as any;
+                const insert = { name: `ランニング ${km} km`, calories: caloriesBurned, protein: 0, fat:0, carbs:0, salt:0, multiplier: 1, source: 'exercise', description: null } as any;
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
                 const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
                 if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), source:'exercise' }, ...records]); setStatusMessage('ランニング記録を保存しました。'); }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), multiplier: Number(r.multiplier) || 1, source:'exercise' }, ...records]); setStatusMessage('ランニング記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
@@ -887,11 +980,11 @@ export default function HomePage() {
                 const el = document.getElementById('manual-cal') as HTMLInputElement | null;
                 const kcal = el ? Math.round(Number(el.value)) : 0;
                 if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
-                const insert = { name: `運動（手動）`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:null } as any;
+                const insert = { name: `運動（手動）`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, multiplier: 1, source:'exercise', description:null } as any;
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
                 const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
                 if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), source:'exercise' }, ...records]); setStatusMessage('運動記録を保存しました。'); }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), multiplier: Number(r.multiplier) || 1, source:'exercise' }, ...records]); setStatusMessage('運動記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
@@ -911,11 +1004,11 @@ export default function HomePage() {
                 if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
                 const hours = min / 60;
                 const kcal = Math.round(met * profile.weight * hours);
-                const insert = { name: `筋トレ ${min}分`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, source:'exercise', description:`MET ${met}` } as any;
+                const insert = { name: `筋トレ ${min}分`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, multiplier: 1, source:'exercise', description:`MET ${met}` } as any;
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
                 const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
                 if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), source:'exercise' }, ...records]); setStatusMessage('筋トレ記録を保存しました。'); }
+                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), multiplier: Number(r.multiplier) || 1, source:'exercise' }, ...records]); setStatusMessage('筋トレ記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
@@ -991,11 +1084,34 @@ export default function HomePage() {
           <div className="field-grid">
             {filteredRecords.map((record) => (
               <div key={record.id} className="record-row">
-                <strong className="record-name">{record.name}</strong>
-                <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
-                <button type="button" className="button-danger record-delete" onClick={() => removeRecord(record.id)}>
-                  削除
-                </button>
+                <div className="record-head">
+                  <strong className="record-name">{record.name}</strong>
+                  <label className="record-multiplier-field">
+                    倍率
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      inputMode="decimal"
+                      placeholder="1.0"
+                      value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
+                      onChange={(e) => handleRecordMultiplierInput(record.id, e.target.value)}
+                      onBlur={() => {
+                        void commitRecordMultiplier(record.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                      }}
+                    />
+                  </label>
+                  <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
+                  <button type="button" className="button-danger record-delete" onClick={() => removeRecord(record.id)}>
+                    削除
+                  </button>
+                </div>
+                <small className="record-nutrients">P {record.protein.toFixed(1)}g / F {record.fat.toFixed(1)}g / C {record.carbs.toFixed(1)}g / 塩 {record.salt.toFixed(1)}g</small>
               </div>
             ))}
           </div>

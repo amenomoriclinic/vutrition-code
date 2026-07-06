@@ -12,10 +12,14 @@ create table if not exists public.nutrition_records (
   fat numeric,
   carbs numeric,
   salt numeric,
+  multiplier numeric default 1,
   source text,
   description text,
   image_url text,
   created_at timestamptz default now()
 );
+
+alter table public.nutrition_records
+  add column if not exists multiplier numeric default 1;
 
 create index if not exists idx_nutrition_records_created_at on public.nutrition_records(created_at desc);
