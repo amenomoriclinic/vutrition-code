@@ -140,7 +140,7 @@ export default function HomePage() {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [description, setDescription] = useState('');
-  const [scanMode, setScanMode] = useState<'food' | 'label'>('food');
+  const [scanMode, setScanMode] = useState<'food' | 'label' | 'text'>('food');
   const [consumedGrams, setConsumedGrams] = useState(100);
   const [exerciseTab, setExerciseTab] = useState<'run' | 'manual' | 'met'>('run');
   const [estimates, setEstimates] = useState<EditableEstimate[]>([]);
@@ -151,6 +151,8 @@ export default function HomePage() {
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [favoriteName, setFavoriteName] = useState('');
+  const [textFoodName, setTextFoodName] = useState('');
+  const [textFoodAmount, setTextFoodAmount] = useState('');
 
   useEffect(() => {
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
@@ -304,16 +306,62 @@ export default function HomePage() {
   };
 
   const handleEstimate = async () => {
-    if (photoFiles.length === 0) {
+    if (scanMode === 'text') {
+      if (!textFoodName.trim()) {
+        setStatusMessage('食品名・料理名を入力してください。');
+        return;
+      }
+    } else if (photoFiles.length === 0) {
       setStatusMessage('写真を1枚以上選択してください。');
       return;
     }
 
     setLoading(true);
     setEstimates([]);
-    setStatusMessage(`推定中... 0/${photoFiles.length}`);
+    setStatusMessage(scanMode === 'text' ? '推定中... テキスト入力を解析しています。' : `推定中... 0/${photoFiles.length}`);
 
     try {
+      if (scanMode === 'text') {
+        const formData = new FormData();
+        formData.append('description', description);
+        formData.append('mode', 'text');
+        formData.append('foodName', textFoodName);
+        formData.append('foodAmount', textFoodAmount);
+
+        const response = await fetch('/api/vision', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+        if (!response.ok || result.error) {
+          setStatusMessage(result.error || '推定に失敗しました。');
+          return;
+        }
+
+        const estimateResponse: NutritionEstimate = {
+          name: result.estimate.name || textFoodName,
+          amountText: result.estimate.amountText || textFoodAmount || '1人前',
+          calories: Number(result.estimate.calories) || 0,
+          protein: Number(result.estimate.protein) || 0,
+          fat: Number(result.estimate.fat) || 0,
+          carbs: Number(result.estimate.carbs) || 0,
+          salt: Number(result.estimate.salt) || 0,
+          description,
+        };
+
+        setEstimates([
+          {
+            ...estimateResponse,
+            tempId: `${Date.now()}-text`,
+            fileName: 'text-input',
+            multiplier: 1,
+          },
+        ]);
+        setStatusMessage('推定完了: 1/1 件');
+        return;
+      }
+
       const next: EditableEstimate[] = [];
       let successCount = 0;
 
@@ -392,7 +440,6 @@ export default function HomePage() {
   };
 
   const saveRecord = async (target: EditableEstimate) => {
-  const [scanMode, setScanMode] = useState<'food' | 'label' | 'text'>('food');
     try {
       const scale = Number(target.multiplier) || 1;
       const insert = {
@@ -496,7 +543,7 @@ export default function HomePage() {
       setStatusMessage('お気に入りの食品名を入力してください。');
       return;
     }
-    setStatusMessage(scanMode === 'text' ? '推定中... テキスト入力を解析しています。' : `推定中... 0/${photoFiles.length}`);
+    const newFavorite: FavoriteFood = {
       id: crypto.randomUUID(),
       name: favoriteName.trim(),
       amountText: '1単位',
@@ -504,9 +551,7 @@ export default function HomePage() {
       protein: 0,
       fat: 0,
       carbs: 0,
-        formData.append('mode', 'text');
-        formData.append('foodName', textFoodName);
-        formData.append('foodAmount', textFoodAmount);
+      salt: 0,
     };
     setFavorites([newFavorite, ...favorites]);
     setFavoriteName('');
