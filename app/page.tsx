@@ -175,6 +175,7 @@ export default function HomePage() {
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
+  const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
@@ -727,6 +728,26 @@ export default function HomePage() {
     }
   };
 
+  const handleRecordMultiplierInput = (id: string, rawValue: string) => {
+    setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
+  };
+
+  const commitRecordMultiplier = async (id: string) => {
+    const rawValue = recordMultiplierDrafts[id];
+    if (rawValue === undefined) {
+      return;
+    }
+
+    const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
+    await updateRecordMultiplier(id, nextMultiplier);
+
+    setRecordMultiplierDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
   return (
     <main>
       <div className="page-card">
@@ -1055,23 +1076,33 @@ export default function HomePage() {
             {filteredRecords.map((record) => (
               <div key={record.id} className="record-row">
                 <div className="record-head">
-                  <strong className="record-name">{record.name}</strong>
-                  <label className="record-multiplier-field">
-                    倍率
+                  <div className="record-main">
+                    <strong className="record-name">{record.name}</strong>
+                    <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
+                  </div>
+                  <label className="record-multiplier-field" aria-label="倍率入力">
+                    <span className="record-multiplier-prefix">x</span>
                     <input
                       type="number"
                       min="0.1"
                       step="0.1"
-                      value={record.multiplier ?? 1}
-                      onChange={(e) => updateRecordMultiplier(record.id, Number(e.target.value))}
+                      inputMode="decimal"
+                      value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
+                      onChange={(e) => handleRecordMultiplierInput(record.id, e.target.value)}
+                      onBlur={() => {
+                        void commitRecordMultiplier(record.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                      }}
                     />
                   </label>
-                  <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
-                  <button type="button" className="button-danger record-delete" onClick={() => removeRecord(record.id)}>
-                    削除
+                  <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
+                    ×
                   </button>
                 </div>
-                <small className="record-nutrients">P {record.protein.toFixed(1)}g / F {record.fat.toFixed(1)}g / C {record.carbs.toFixed(1)}g / 塩 {record.salt.toFixed(1)}g</small>
               </div>
             ))}
           </div>

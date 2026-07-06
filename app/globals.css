@@ -279,43 +279,61 @@ small {
 
 .record-row {
   display: grid;
-  gap: 6px;
+  gap: 2px;
   align-items: stretch;
-  padding: 8px 10px;
-  border-radius: 12px;
+  padding: 5px 6px;
+  border-radius: 9px;
   background: #f8fafc;
 }
 
 .record-head {
   display: grid;
-  grid-template-columns: 1fr 86px auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+}
+
+.record-main {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
 }
 
 .record-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
 }
 
 .record-kcal {
-  font-size: 0.88rem;
+  font-size: 0.72rem;
   color: #0f766e;
   white-space: nowrap;
 }
 
 .record-multiplier-field {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   color: #475569;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.record-multiplier-prefix {
+  color: #64748b;
+  line-height: 1;
 }
 
 .record-multiplier-field input {
-  padding: 6px 8px;
-  border-radius: 10px;
-  font-size: 0.82rem;
+  width: 50px;
+  min-width: 0;
+  padding: 2px 5px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  text-align: right;
 }
 
 .record-nutrients {
@@ -327,10 +345,17 @@ small {
 }
 
 .record-delete {
-  padding: 6px 10px;
+  padding: 1px 6px;
   min-width: auto;
-  border-radius: 10px;
-  font-size: 0.78rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.button-danger.record-delete {
+  padding: 1px 6px;
+  min-width: 0;
+  border-radius: 6px;
 }
 
 .pending-row {
@@ -418,20 +443,31 @@ small {
   }
 
   .record-row {
-    gap: 6px;
+    gap: 2px;
+    padding: 4px 5px;
   }
 
   .record-head {
-    grid-template-columns: 1fr 76px auto auto;
-    gap: 6px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 3px;
   }
 
   .record-name {
-    font-size: 0.84rem;
+    font-size: 0.74rem;
   }
 
   .record-kcal {
-    font-size: 0.8rem;
+    font-size: 0.68rem;
+  }
+
+  .record-multiplier-field {
+    font-size: 0.62rem;
+  }
+
+  .record-multiplier-field input {
+    width: 44px;
+    padding: 1px 4px;
+    font-size: 0.68rem;
   }
 
   .pending-row {
@@ -449,6 +485,8 @@ small {
 
   .record-delete {
     width: auto;
+    padding: 1px 5px;
+    font-size: 0.76rem;
   }
 
   .record-nutrients {
