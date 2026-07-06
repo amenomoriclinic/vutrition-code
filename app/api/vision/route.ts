@@ -11,18 +11,33 @@ export async function POST(request: Request) {
   const photo = formData.get('photo');
   const description = String(formData.get('description') || '').trim();
   const mode = String(formData.get('mode') || 'food');
+  const foodName = String(formData.get('foodName') || '').trim();
+  const foodAmount = String(formData.get('foodAmount') || '').trim();
   const consumedGrams = Number(formData.get('consumedGrams') || 100);
 
-  if (!photo || !(photo instanceof File)) {
+  if (mode !== 'text' && (!photo || !(photo instanceof File))) {
     return NextResponse.json({ error: 'Photo is required.' }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await photo.arrayBuffer());
-  const base64 = buffer.toString('base64');
+  const prompt = mode === 'text'
+    ? `次の食品名・料理名から、一般的な日本の食品データベースを参考に、おおよその栄養素を推定してJSONだけを返してください。正確な商品名でなくても、類似品や一般的な分量を使って推定してください。入力: 食品名/料理名="${foodName || '不明'}", 量="${foodAmount || '未指定'}", 補足="${description || 'なし'}"。\n必ず以下の形式のJSONのみ返してください:\n{"name":"食品名","amountText":"1人前","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
+    : mode === 'label'
+      ? `この画像には食品パッケージの栄養成分表示が写っています。以下のJSONだけを返してください。食品名、栄養表示の基準量、100gあたりの栄養素値、または栄養表示の量を読み取ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"100gあたり","baseAmount":100,"baseUnit":"g","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
+      : `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`;
 
-  const prompt = mode === 'label'
-    ? `この画像には食品パッケージの栄養成分表示が写っています。以下のJSONだけを返してください。食品名、栄養表示の基準量、100gあたりの栄養素値、または栄養表示の量を読み取ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"100gあたり","baseAmount":100,"baseUnit":"g","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
-    : `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`;
+  const contentParts = mode === 'text'
+    ? [{ type: 'text', text: prompt }]
+    : [
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: (photo as File).type,
+            data: Buffer.from(await (photo as File).arrayBuffer()).toString('base64'),
+          },
+        },
+        { type: 'text', text: prompt },
+      ];
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -37,17 +52,7 @@ export async function POST(request: Request) {
       messages: [
         {
           role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: photo.type,
-                data: base64,
-              },
-            },
-            { type: 'text', text: prompt },
-          ],
+          content: contentParts,
         },
       ],
     }),

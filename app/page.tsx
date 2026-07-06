@@ -392,7 +392,7 @@ export default function HomePage() {
   };
 
   const saveRecord = async (target: EditableEstimate) => {
-    setLoading(true);
+  const [scanMode, setScanMode] = useState<'food' | 'label' | 'text'>('food');
     try {
       const scale = Number(target.multiplier) || 1;
       const insert = {
@@ -496,7 +496,7 @@ export default function HomePage() {
       setStatusMessage('お気に入りの食品名を入力してください。');
       return;
     }
-    const newFavorite: FavoriteFood = {
+    setStatusMessage(scanMode === 'text' ? '推定中... テキスト入力を解析しています。' : `推定中... 0/${photoFiles.length}`);
       id: crypto.randomUUID(),
       name: favoriteName.trim(),
       amountText: '1単位',
@@ -504,7 +504,9 @@ export default function HomePage() {
       protein: 0,
       fat: 0,
       carbs: 0,
-      salt: 0,
+        formData.append('mode', 'text');
+        formData.append('foodName', textFoodName);
+        formData.append('foodAmount', textFoodAmount);
     };
     setFavorites([newFavorite, ...favorites]);
     setFavoriteName('');
@@ -549,25 +551,50 @@ export default function HomePage() {
       </div>
 
       <div className="page-card">
-        <h2 className="section-title">写真から栄養推定</h2>
+        <h2 className="section-title">写真・テキストから栄養推定</h2>
         <div className="field-grid">
           <div>
-            <div style={{display:'flex', gap:8, marginBottom:8}}>
+            <div style={{display:'flex', gap:8, marginBottom:8, flexWrap:'wrap'}}>
               <button type="button" onClick={() => setScanMode('food')} style={{padding:8, borderRadius:6, background: scanMode==='food' ? '#0b74de' : '#eee', color: scanMode==='food' ? '#fff' : '#000'}}>料理写真</button>
               <button type="button" onClick={() => setScanMode('label')} style={{padding:8, borderRadius:6, background: scanMode==='label' ? '#0b74de' : '#eee', color: scanMode==='label' ? '#fff' : '#000'}}>栄養表示ラベル</button>
+              <button type="button" onClick={() => setScanMode('text')} style={{padding:8, borderRadius:6, background: scanMode==='text' ? '#0b74de' : '#eee', color: scanMode==='text' ? '#fff' : '#000'}}>テキスト入力</button>
             </div>
-            <small>{scanMode==='food' ? '料理全体を撮影して栄養推定します。' : 'パッケージの栄養表示を撮影して数値を読み取ります。'}</small>
+            <small>
+              {scanMode === 'food'
+                ? '料理全体を撮影して栄養推定します。'
+                : scanMode === 'label'
+                  ? 'パッケージの栄養表示を撮影して数値を読み取ります。'
+                  : '食品名だけで推定できます。写真なしでも入力内容から類推します。'}
+            </small>
           </div>
-          <label>
-            写真
-            <input type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoChange} />
-          </label>
+
+          {scanMode !== 'text' ? (
+            <label>
+              写真
+              <input type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoChange} />
+            </label>
+          ) : null}
+
           {scanMode === 'label' ? (
             <label>
               食べた量 (g)
               <input type="number" min="1" value={consumedGrams} onChange={(e) => setConsumedGrams(Number(e.target.value))} />
             </label>
           ) : null}
+
+          {scanMode === 'text' ? (
+            <>
+              <label>
+                食品名・料理名
+                <input value={textFoodName} onChange={(e) => setTextFoodName(e.target.value)} placeholder="例: ざるそば1人前 / バナナ1本 / マクドナルド ビッグマック" />
+              </label>
+              <label>
+                量（任意）
+                <input value={textFoodAmount} onChange={(e) => setTextFoodAmount(e.target.value)} placeholder="例: 1人前、2個、Mサイズ" />
+              </label>
+            </>
+          ) : null}
+
           {photoPreviews.length > 0 ? (
             <div className="card-row">
               {photoPreviews.map((src, idx) => (
@@ -575,10 +602,12 @@ export default function HomePage() {
               ))}
             </div>
           ) : null}
+
           <label>
             店名・商品名・メーカー名など(任意)
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例: ガスト チーズINハンバーグ" />
           </label>
+
           <button className="button-primary" type="button" onClick={handleEstimate} disabled={loading}>
             {loading ? '推定中...' : '推定開始'}
           </button>
@@ -586,7 +615,7 @@ export default function HomePage() {
         </div>
       </div>
 
-        {estimates.length > 0 ? (
+      {estimates.length > 0 ? (
         <div className="page-card">
           <h2 className="section-title">推定結果の確認と修正（{estimates.length}件）</h2>
           <div className="field-grid">
