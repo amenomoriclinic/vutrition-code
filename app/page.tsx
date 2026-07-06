@@ -551,7 +551,7 @@ export default function HomePage() {
       </div>
 
       <div className="page-card">
-        <h2 className="section-title">写真・テキストから栄養推定</h2>
+        <h2 className="section-title">食事記録</h2>
         <div className="field-grid">
           <div>
             <div style={{display:'flex', gap:8, marginBottom:8, flexWrap:'wrap'}}>
@@ -607,12 +607,41 @@ export default function HomePage() {
             店名・商品名・メーカー名など(任意)
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例: ガスト チーズINハンバーグ" />
           </label>
-
-          <button className="button-primary" type="button" onClick={handleEstimate} disabled={loading}>
-            {loading ? '推定中...' : '推定開始'}
-          </button>
-          {statusMessage ? <p><small>{statusMessage}</small></p> : null}
         </div>
+      </div>
+
+      <div className="page-card">
+        <h2 className="section-title">マイ定番食品</h2>
+        <p>よく使う組成が固定された食品を登録して、ワンタップで記録できます。</p>
+        <div className="field-grid field-grid-2">
+          <label>
+            新しい定番食品名
+            <input value={favoriteName} onChange={(e) => setFavoriteName(e.target.value)} placeholder="例: おにぎり" />
+          </label>
+          <button className="button-secondary" type="button" onClick={addFavorite}>
+            定番食品に追加
+          </button>
+        </div>
+        <div className="card-row">
+          {favorites.map((favorite) => (
+            <div key={favorite.id} className="favorite-item">
+              <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
+                {favorite.name}
+              </button>
+              <button className="button-danger" type="button" onClick={() => removeFavorite(favorite.id)}>
+                削除
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="page-card">
+        <h2 className="section-title">栄養推定開始</h2>
+        <button className="button-primary" type="button" onClick={handleEstimate} disabled={loading}>
+          {loading ? '推定中...' : '推定開始'}
+        </button>
+        {statusMessage ? <p><small>{statusMessage}</small></p> : null}
       </div>
 
       {estimates.length > 0 ? (
@@ -740,62 +769,6 @@ export default function HomePage() {
       </div>
 
       <div className="page-card">
-        <h2 className="section-title">マイ定番食品</h2>
-        <p>よく使う組成が固定された食品を登録して、ワンタップで記録できます。</p>
-        <div className="field-grid field-grid-2">
-          <label>
-            新しい定番食品名
-            <input value={favoriteName} onChange={(e) => setFavoriteName(e.target.value)} placeholder="例: おにぎり" />
-          </label>
-          <button className="button-secondary" type="button" onClick={addFavorite}>
-            定番食品に追加
-          </button>
-        </div>
-        <div className="card-row">
-          {favorites.map((favorite) => (
-            <div key={favorite.id} className="favorite-item">
-              <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
-                {favorite.name}
-              </button>
-              <button className="button-danger" type="button" onClick={() => removeFavorite(favorite.id)}>
-                削除
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="page-card">
-        <h2 className="section-title">プロフィール</h2>
-        <div className="profile-grid">
-          <label>
-            年齢
-            <input type="number" value={profile.age} onChange={(e) => setProfile({ ...profile, age: Number(e.target.value) })} />
-          </label>
-          <label>
-            体重(kg)
-            <input type="number" value={profile.weight} onChange={(e) => setProfile({ ...profile, weight: Number(e.target.value) })} />
-          </label>
-          <label>
-            性別
-            <select value={profile.sex} onChange={(e) => setProfile({ ...profile, sex: e.target.value as Sex })}>
-              <option value="male">男性</option>
-              <option value="female">女性</option>
-            </select>
-          </label>
-          <label>
-            身体活動レベル
-            <select value={profile.activity} onChange={(e) => setProfile({ ...profile, activity: e.target.value as ActivityLevel })}>
-              <option value="low">低い</option>
-              <option value="moderate">普通</option>
-              <option value="high">高い</option>
-            </select>
-          </label>
-        </div>
-        <p><small>推定エネルギー必要量は体重と活動レベルを元に簡易計算しています。</small></p>
-      </div>
-
-      <div className="page-card">
         <h2 className="section-title">日次集計</h2>
         <label>
           日付を選択
@@ -863,25 +836,46 @@ export default function HomePage() {
         ) : (
           <div className="field-grid">
             {filteredRecords.map((record) => (
-              <div key={record.id} className="summary-item">
-                <div>
-                  <div><strong>{record.name}</strong> <small>{record.amountText}</small></div>
-                  <div>
-                    <small>
-                      {record.source === 'favorite' ? '定番食品' : record.source === 'exercise' ? '運動記録' : '写真推定'}
-                    </small>
-                  </div>
-                </div>
-                <div className="record-actions">
-                  <span>{record.calories.toFixed(0)} kcal</span>
-                  <button type="button" className="button-danger" onClick={() => removeRecord(record.id)}>
-                    🗑️ 削除
-                  </button>
-                </div>
+              <div key={record.id} className="record-row">
+                <strong className="record-name">{record.name}</strong>
+                <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
+                <button type="button" className="button-danger record-delete" onClick={() => removeRecord(record.id)}>
+                  削除
+                </button>
               </div>
             ))}
           </div>
         )}
+      </div>
+
+      <div className="page-card">
+        <h2 className="section-title">プロフィール</h2>
+        <div className="profile-grid">
+          <label>
+            年齢
+            <input type="number" value={profile.age} onChange={(e) => setProfile({ ...profile, age: Number(e.target.value) })} />
+          </label>
+          <label>
+            体重(kg)
+            <input type="number" value={profile.weight} onChange={(e) => setProfile({ ...profile, weight: Number(e.target.value) })} />
+          </label>
+          <label>
+            性別
+            <select value={profile.sex} onChange={(e) => setProfile({ ...profile, sex: e.target.value as Sex })}>
+              <option value="male">男性</option>
+              <option value="female">女性</option>
+            </select>
+          </label>
+          <label>
+            身体活動レベル
+            <select value={profile.activity} onChange={(e) => setProfile({ ...profile, activity: e.target.value as ActivityLevel })}>
+              <option value="low">低い</option>
+              <option value="moderate">普通</option>
+              <option value="high">高い</option>
+            </select>
+          </label>
+        </div>
+        <p><small>推定エネルギー必要量は体重と活動レベルを元に簡易計算しています。</small></p>
       </div>
     </main>
   );

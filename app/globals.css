@@ -226,6 +226,36 @@ small {
   gap: 12px;
 }
 
+.record-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.record-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+.record-kcal {
+  font-size: 0.88rem;
+  color: #0f766e;
+  white-space: nowrap;
+}
+
+.record-delete {
+  padding: 6px 10px;
+  min-width: auto;
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+
 .button-danger {
   background: #fef2f2;
   color: #b91c1c;
@@ -245,8 +275,25 @@ small {
     align-items: stretch;
   }
 
+  .record-row {
+    grid-template-columns: 1fr auto auto;
+    gap: 6px;
+  }
+
+  .record-name {
+    font-size: 0.84rem;
+  }
+
+  .record-kcal {
+    font-size: 0.8rem;
+  }
+
   .button-danger {
     width: 100%;
+  }
+
+  .record-delete {
+    width: auto;
   }
   .favorite-item .button-danger {
     width: auto;
