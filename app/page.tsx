@@ -1086,13 +1086,15 @@ export default function HomePage() {
               <div key={record.id} className="record-row">
                 <div className="record-head">
                   <strong className="record-name">{record.name}</strong>
+                  <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
                   <label className="record-multiplier-field">
-                    倍率
+                    <span className="record-multiplier-prefix">x</span>
                     <input
                       type="number"
                       min="0.1"
                       step="0.1"
                       inputMode="decimal"
+                      aria-label="倍率"
                       placeholder="1.0"
                       value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
                       onChange={(e) => handleRecordMultiplierInput(record.id, e.target.value)}
@@ -1106,7 +1108,6 @@ export default function HomePage() {
                       }}
                     />
                   </label>
-                  <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
                   <button type="button" className="button-danger record-delete" onClick={() => removeRecord(record.id)}>
                     削除
                   </button>
