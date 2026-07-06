@@ -329,6 +329,14 @@ small {
   min-width: 90px;
 }
 
+.button-danger.record-delete {
+  padding: 3px 7px;
+  min-width: 0;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  line-height: 1;
+}
+
 @media (max-width: 720px) {
   .profile-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -382,6 +390,11 @@ small {
   .record-delete {
     width: auto;
     margin-top: 0;
+  }
+
+  .button-danger.record-delete {
+    padding: 2px 6px;
+    font-size: 0.82rem;
   }
 
   .record-nutrients {

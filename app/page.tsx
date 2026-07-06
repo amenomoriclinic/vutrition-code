@@ -730,17 +730,6 @@ export default function HomePage() {
 
   const handleRecordMultiplierInput = (id: string, rawValue: string) => {
     setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
-
-    const parsed = Number(rawValue);
-    if (!Number.isFinite(parsed)) {
-      return;
-    }
-
-    const safeMultiplier = Math.max(0.1, parsed);
-    setRecords((prev) => prev.map((record) => {
-      if (record.id !== id) return record;
-      return applyMultiplierToRecord(record, safeMultiplier);
-    }));
   };
 
   const commitRecordMultiplier = async (id: string) => {
@@ -1108,8 +1097,8 @@ export default function HomePage() {
                       }}
                     />
                   </label>
-                  <button type="button" className="button-danger record-delete" onClick={() => removeRecord(record.id)}>
-                    削除
+                  <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
+                    ×
                   </button>
                 </div>
                 <small className="record-nutrients">P {record.protein.toFixed(1)}g / F {record.fat.toFixed(1)}g / C {record.carbs.toFixed(1)}g / 塩 {record.salt.toFixed(1)}g</small>
