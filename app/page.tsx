@@ -175,7 +175,6 @@ export default function HomePage() {
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
-  const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
@@ -728,26 +727,6 @@ export default function HomePage() {
     }
   };
 
-  const handleRecordMultiplierInput = (id: string, rawValue: string) => {
-    setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
-  };
-
-  const commitRecordMultiplier = async (id: string) => {
-    const rawValue = recordMultiplierDrafts[id];
-    if (rawValue === undefined) {
-      return;
-    }
-
-    const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
-    await updateRecordMultiplier(id, nextMultiplier);
-
-    setRecordMultiplierDrafts((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  };
-
   return (
     <main>
       <div className="page-card">
@@ -884,10 +863,10 @@ export default function HomePage() {
           <h2 className="section-title">推定結果の確認と修正（{estimates.length}件）</h2>
           <div className="field-grid">
             {estimates.map((estimate) => (
-              <div key={estimate.tempId} className="page-card" style={{ marginBottom: 8 }}>
+              <div key={estimate.tempId} className="page-card estimate-card" style={{ marginBottom: 8 }}>
                 <p><small>{estimate.fileName}</small></p>
-                {estimate.imageUrl ? <img className="image-preview" src={estimate.imageUrl} alt={estimate.fileName} style={{ maxWidth: 220 }} /> : null}
-                <div className="field-grid field-grid-2">
+                {estimate.imageUrl ? <img className="image-preview estimate-image" src={estimate.imageUrl} alt={estimate.fileName} style={{ maxWidth: 220 }} /> : null}
+                <div className="field-grid field-grid-2 estimate-meta-grid">
                   <label>
                     料理名
                     <input value={estimate.name} onChange={(e) => updateEstimate(estimate.tempId, { name: e.target.value })} />
@@ -904,24 +883,26 @@ export default function HomePage() {
                     倍率
                     <input type="number" min="0.1" step="0.1" value={estimate.multiplier} onChange={(e) => updateEstimate(estimate.tempId, { multiplier: Number(e.target.value) || 1 })} />
                   </label>
-                  <label>
-                    基準カロリー(kcal)
+                </div>
+                <div className="estimate-nutrients-grid">
+                  <label className="estimate-inline-field">
+                    <span>kcal</span>
                     <input type="number" value={estimate.baseCalories} onChange={(e) => updateEstimate(estimate.tempId, { baseCalories: Number(e.target.value) || 0 })} />
                   </label>
-                  <label>
-                    基準タンパク質(g)
+                  <label className="estimate-inline-field">
+                    <span>P(g)</span>
                     <input type="number" value={estimate.baseProtein} onChange={(e) => updateEstimate(estimate.tempId, { baseProtein: Number(e.target.value) || 0 })} />
                   </label>
-                  <label>
-                    基準脂質(g)
+                  <label className="estimate-inline-field">
+                    <span>F(g)</span>
                     <input type="number" value={estimate.baseFat} onChange={(e) => updateEstimate(estimate.tempId, { baseFat: Number(e.target.value) || 0 })} />
                   </label>
-                  <label>
-                    基準炭水化物(g)
+                  <label className="estimate-inline-field">
+                    <span>C(g)</span>
                     <input type="number" value={estimate.baseCarbs} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
                   </label>
-                  <label>
-                    基準食塩相当量(g)
+                  <label className="estimate-inline-field">
+                    <span>塩(g)</span>
                     <input type="number" step="0.1" value={estimate.baseSalt} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
                   </label>
                 </div>
@@ -1075,30 +1056,19 @@ export default function HomePage() {
               <div key={record.id} className="record-row">
                 <div className="record-head">
                   <strong className="record-name">{record.name}</strong>
-                  <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
                   <label className="record-multiplier-field">
-                    <span className="record-multiplier-prefix">x</span>
+                    倍率
                     <input
                       type="number"
                       min="0.1"
                       step="0.1"
-                      inputMode="decimal"
-                      aria-label="倍率"
-                      placeholder="1.0"
-                      value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
-                      onChange={(e) => handleRecordMultiplierInput(record.id, e.target.value)}
-                      onBlur={() => {
-                        void commitRecordMultiplier(record.id);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          (e.currentTarget as HTMLInputElement).blur();
-                        }
-                      }}
+                      value={record.multiplier ?? 1}
+                      onChange={(e) => updateRecordMultiplier(record.id, Number(e.target.value))}
                     />
                   </label>
-                  <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
-                    ×
+                  <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
+                  <button type="button" className="button-danger record-delete" onClick={() => removeRecord(record.id)}>
+                    削除
                   </button>
                 </div>
                 <small className="record-nutrients">P {record.protein.toFixed(1)}g / F {record.fat.toFixed(1)}g / C {record.carbs.toFixed(1)}g / 塩 {record.salt.toFixed(1)}g</small>

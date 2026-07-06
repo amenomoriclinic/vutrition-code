@@ -218,6 +218,57 @@ small {
   color: #64748b;
 }
 
+.estimate-card {
+  padding: 14px;
+}
+
+.estimate-image {
+  max-width: 180px !important;
+}
+
+.estimate-meta-grid {
+  gap: 10px;
+}
+
+.estimate-meta-grid label {
+  font-size: 0.82rem;
+}
+
+.estimate-meta-grid input {
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}
+
+.estimate-nutrients-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.estimate-inline-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 0.74rem;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.estimate-inline-field input {
+  width: 70px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  text-align: right;
+}
+
 .record-actions {
   display: flex;
   flex-wrap: wrap;
@@ -230,16 +281,16 @@ small {
   display: grid;
   gap: 6px;
   align-items: stretch;
-  padding: 8px;
+  padding: 8px 10px;
   border-radius: 12px;
   background: #f8fafc;
 }
 
 .record-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 64px auto;
+  grid-template-columns: 1fr 86px auto auto;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
 }
 
 .record-name {
@@ -250,47 +301,36 @@ small {
 }
 
 .record-kcal {
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   color: #0f766e;
   white-space: nowrap;
-  justify-self: end;
 }
 
 .record-multiplier-field {
   margin: 0;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   color: #475569;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 4px;
-}
-
-.record-multiplier-prefix {
-  color: #64748b;
-  line-height: 1;
 }
 
 .record-multiplier-field input {
-  width: 100%;
-  min-width: 0;
-  padding: 4px 6px;
-  border-radius: 8px;
-  font-size: 0.78rem;
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 0.82rem;
 }
 
 .record-nutrients {
   color: #64748b;
   font-size: 0.75rem;
-  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .record-delete {
-  padding: 5px 8px;
+  padding: 6px 10px;
   min-width: auto;
-  border-radius: 8px;
-  font-size: 0.74rem;
-  white-space: nowrap;
+  border-radius: 10px;
+  font-size: 0.78rem;
 }
 
 .pending-row {
@@ -329,17 +369,47 @@ small {
   min-width: 90px;
 }
 
-.button-danger.record-delete {
-  padding: 3px 7px;
-  min-width: 0;
-  border-radius: 8px;
-  font-size: 0.88rem;
-  line-height: 1;
-}
-
 @media (max-width: 720px) {
   .profile-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .estimate-card {
+    padding: 10px;
+  }
+
+  .estimate-image {
+    max-width: 130px !important;
+  }
+
+  .estimate-meta-grid {
+    gap: 8px;
+  }
+
+  .estimate-meta-grid label {
+    font-size: 0.76rem;
+  }
+
+  .estimate-meta-grid input {
+    padding: 7px 8px;
+    font-size: 0.82rem;
+  }
+
+  .estimate-nutrients-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .estimate-inline-field {
+    font-size: 0.7rem;
+    padding: 5px 6px;
+    gap: 4px;
+  }
+
+  .estimate-inline-field input {
+    width: 58px;
+    padding: 3px 5px;
+    font-size: 0.72rem;
   }
 
   .record-actions {
@@ -352,26 +422,16 @@ small {
   }
 
   .record-head {
-    grid-template-columns: minmax(0, 1fr) auto 58px auto;
-    gap: 4px;
-    align-items: center;
+    grid-template-columns: 1fr 76px auto auto;
+    gap: 6px;
   }
 
   .record-name {
-    font-size: 0.8rem;
+    font-size: 0.84rem;
   }
 
   .record-kcal {
-    font-size: 0.74rem;
-  }
-
-  .record-multiplier-prefix {
-    font-size: 0.64rem;
-  }
-
-  .record-multiplier-field input {
-    padding: 3px 5px;
-    font-size: 0.72rem;
+    font-size: 0.8rem;
   }
 
   .pending-row {
@@ -389,12 +449,6 @@ small {
 
   .record-delete {
     width: auto;
-    margin-top: 0;
-  }
-
-  .button-danger.record-delete {
-    padding: 2px 6px;
-    font-size: 0.82rem;
   }
 
   .record-nutrients {
