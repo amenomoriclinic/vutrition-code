@@ -23,6 +23,26 @@ type NutritionEstimate = {
 type EditableEstimate = NutritionEstimate & {
   tempId: string;
   fileName: string;
+  quantity: number;
+  multiplier: number;
+  baseCalories: number;
+  baseProtein: number;
+  baseFat: number;
+  baseCarbs: number;
+  baseSalt: number;
+};
+
+type PendingFood = {
+  id: string;
+  mode: 'food' | 'label' | 'text';
+  file?: File;
+  fileName: string;
+  previewUrl?: string;
+  foodName?: string;
+  foodAmount?: string;
+  description: string;
+  consumedGrams: number;
+  quantity: number;
   multiplier: number;
 };
 
@@ -153,6 +173,7 @@ export default function HomePage() {
   const [favoriteName, setFavoriteName] = useState('');
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
+  const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
 
   useEffect(() => {
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
@@ -300,81 +321,118 @@ export default function HomePage() {
     localStorage.setItem(STORAGE_PROFILE, JSON.stringify(profile));
   }, [profile]);
 
+  const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
+
+  const recalcEstimate = (estimate: EditableEstimate): EditableEstimate => {
+    const quantity = Math.max(0.1, Number(estimate.quantity) || 1);
+    const multiplier = Math.max(0.1, Number(estimate.multiplier) || 1);
+    const scale = quantity * multiplier;
+    return {
+      ...estimate,
+      quantity,
+      multiplier,
+      calories: round1(estimate.baseCalories * scale),
+      protein: round1(estimate.baseProtein * scale),
+      fat: round1(estimate.baseFat * scale),
+      carbs: round1(estimate.baseCarbs * scale),
+      salt: round1(estimate.baseSalt * scale),
+    };
+  };
+
   const handlePhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     setPhotoFiles(files);
   };
 
-  const handleEstimate = async () => {
+  const addPendingFood = () => {
     if (scanMode === 'text') {
       if (!textFoodName.trim()) {
         setStatusMessage('食品名・料理名を入力してください。');
         return;
       }
-    } else if (photoFiles.length === 0) {
+      const queued: PendingFood = {
+        id: crypto.randomUUID(),
+        mode: 'text',
+        fileName: textFoodName.trim(),
+        foodName: textFoodName.trim(),
+        foodAmount: textFoodAmount.trim(),
+        description,
+        consumedGrams,
+        quantity: 1,
+        multiplier: 1,
+      };
+      setPendingFoods((prev) => [queued, ...prev]);
+      setTextFoodName('');
+      setTextFoodAmount('');
+      setStatusMessage('食品をリストに追加しました。');
+      return;
+    }
+
+    if (photoFiles.length === 0) {
       setStatusMessage('写真を1枚以上選択してください。');
+      return;
+    }
+
+    const queued = photoFiles.map((file) => ({
+      id: crypto.randomUUID(),
+      mode: scanMode,
+      file,
+      fileName: file.name,
+      previewUrl: URL.createObjectURL(file),
+      description,
+      consumedGrams,
+      quantity: 1,
+      multiplier: 1,
+    } as PendingFood));
+
+    setPendingFoods((prev) => [...queued, ...prev]);
+    setPhotoFiles([]);
+    setStatusMessage(`${queued.length}件の食品をリストに追加しました。`);
+  };
+
+  const removePendingFood = (id: string) => {
+    setPendingFoods((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((item) => item.id !== id);
+    });
+  };
+
+  const updatePendingFood = (id: string, patch: Partial<Pick<PendingFood, 'quantity' | 'multiplier'>>) => {
+    setPendingFoods((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
+
+  const handleEstimate = async () => {
+    if (pendingFoods.length === 0) {
+      setStatusMessage('先に食品を1件以上リストへ追加してください。');
       return;
     }
 
     setLoading(true);
     setEstimates([]);
-    setStatusMessage(scanMode === 'text' ? '推定中... テキスト入力を解析しています。' : `推定中... 0/${photoFiles.length}`);
+    setStatusMessage(`推定中... 0/${pendingFoods.length}`);
 
     try {
-      if (scanMode === 'text') {
-        const formData = new FormData();
-        formData.append('description', description);
-        formData.append('mode', 'text');
-        formData.append('foodName', textFoodName);
-        formData.append('foodAmount', textFoodAmount);
-
-        const response = await fetch('/api/vision', {
-          method: 'POST',
-          body: formData,
-        });
-
-        const result = await response.json();
-        if (!response.ok || result.error) {
-          setStatusMessage(result.error || '推定に失敗しました。');
-          return;
-        }
-
-        const estimateResponse: NutritionEstimate = {
-          name: result.estimate.name || textFoodName,
-          amountText: result.estimate.amountText || textFoodAmount || '1人前',
-          calories: Number(result.estimate.calories) || 0,
-          protein: Number(result.estimate.protein) || 0,
-          fat: Number(result.estimate.fat) || 0,
-          carbs: Number(result.estimate.carbs) || 0,
-          salt: Number(result.estimate.salt) || 0,
-          description,
-        };
-
-        setEstimates([
-          {
-            ...estimateResponse,
-            tempId: `${Date.now()}-text`,
-            fileName: 'text-input',
-            multiplier: 1,
-          },
-        ]);
-        setStatusMessage('推定完了: 1/1 件');
-        return;
-      }
-
       const next: EditableEstimate[] = [];
       let successCount = 0;
 
-      for (let i = 0; i < photoFiles.length; i += 1) {
-        const file = photoFiles[i];
-        setStatusMessage(`推定中... ${i + 1}/${photoFiles.length} (${file.name})`);
+      for (let i = 0; i < pendingFoods.length; i += 1) {
+        const item = pendingFoods[i];
+        setStatusMessage(`推定中... ${i + 1}/${pendingFoods.length} (${item.fileName})`);
 
         const formData = new FormData();
-        formData.append('photo', file);
-        formData.append('description', description);
-        formData.append('mode', scanMode);
-        if (scanMode === 'label') {
-          formData.append('consumedGrams', String(consumedGrams));
+        formData.append('description', item.description);
+        formData.append('mode', item.mode);
+        if (item.mode === 'text') {
+          formData.append('foodName', item.foodName || item.fileName);
+          formData.append('foodAmount', item.foodAmount || '1人前');
+        } else if (item.file) {
+          formData.append('photo', item.file);
+        }
+        if (item.mode === 'label') {
+          formData.append('consumedGrams', String(item.consumedGrams));
         }
 
         const response = await fetch('/api/vision', {
@@ -390,7 +448,7 @@ export default function HomePage() {
         let estimateResponse: NutritionEstimate;
         if (result.estimate.mode === 'label') {
           const baseAmount = Number(result.estimate.baseAmount) || 100;
-          const grams = Number(result.estimate.consumedGrams || consumedGrams) || consumedGrams;
+          const grams = Number(result.estimate.consumedGrams || item.consumedGrams) || item.consumedGrams;
           const scale = grams / baseAmount;
           estimateResponse = {
             name: result.estimate.name || '不明な食品',
@@ -400,34 +458,40 @@ export default function HomePage() {
             fat: Math.round((Number(result.estimate.fat) || 0) * scale * 10) / 10,
             carbs: Math.round((Number(result.estimate.carbs) || 0) * scale * 10) / 10,
             salt: Math.round((Number(result.estimate.salt) || 0) * scale * 10) / 10,
-            description: `${description} (${baseAmount}gあたりの栄養表示を${grams}g換算)`,
-            imageUrl: photoPreviews[i],
+            description: `${item.description} (${baseAmount}gあたりの栄養表示を${grams}g換算)`,
+            imageUrl: item.previewUrl,
           };
         } else {
           estimateResponse = {
-            name: result.estimate.name || '不明な料理',
-            amountText: result.estimate.amountText || '1品',
+            name: result.estimate.name || item.foodName || '不明な料理',
+            amountText: result.estimate.amountText || item.foodAmount || '1品',
             calories: Number(result.estimate.calories) || 0,
             protein: Number(result.estimate.protein) || 0,
             fat: Number(result.estimate.fat) || 0,
             carbs: Number(result.estimate.carbs) || 0,
             salt: Number(result.estimate.salt) || 0,
-            description,
-            imageUrl: photoPreviews[i],
+            description: item.description,
+            imageUrl: item.previewUrl,
           };
         }
 
-        next.push({
+        next.push(recalcEstimate({
           ...estimateResponse,
-          tempId: `${Date.now()}-${i}`,
-          fileName: file.name,
-          multiplier: 1,
-        });
+          tempId: item.id,
+          fileName: item.fileName,
+          quantity: item.quantity,
+          multiplier: item.multiplier,
+          baseCalories: estimateResponse.calories,
+          baseProtein: estimateResponse.protein,
+          baseFat: estimateResponse.fat,
+          baseCarbs: estimateResponse.carbs,
+          baseSalt: estimateResponse.salt,
+        }));
         successCount += 1;
       }
 
       setEstimates(next);
-      setStatusMessage(`推定完了: ${successCount}/${photoFiles.length} 件`);
+      setStatusMessage(`推定完了: ${successCount}/${pendingFoods.length} 件`);
     } catch (error) {
       setStatusMessage('サーバーに接続できませんでした。');
     } finally {
@@ -435,53 +499,68 @@ export default function HomePage() {
     }
   };
 
-  const updateEstimate = (tempId: string, updater: (prev: EditableEstimate) => EditableEstimate) => {
-    setEstimates((prev) => prev.map((e) => (e.tempId === tempId ? updater(e) : e)));
+  const updateEstimate = (tempId: string, patch: Partial<EditableEstimate>) => {
+    setEstimates((prev) => prev.map((estimate) => {
+      if (estimate.tempId !== tempId) return estimate;
+      return recalcEstimate({ ...estimate, ...patch });
+    }));
   };
 
-  const saveRecord = async (target: EditableEstimate) => {
+  const saveAllEstimates = async () => {
+    if (estimates.length === 0) {
+      setStatusMessage('保存する推定結果がありません。');
+      return;
+    }
+
+    setLoading(true);
     try {
-      const scale = Number(target.multiplier) || 1;
-      const insert = {
+      const inserts = estimates.map((target) => ({
         name: target.name,
         amount_text: target.amountText,
-        calories: Math.round((target.calories || 0) * scale * 10) / 10,
-        protein: Math.round((target.protein || 0) * scale * 10) / 10,
-        fat: Math.round((target.fat || 0) * scale * 10) / 10,
-        carbs: Math.round((target.carbs || 0) * scale * 10) / 10,
-        salt: Math.round((target.salt || 0) * scale * 10) / 10,
+        calories: round1(target.calories),
+        protein: round1(target.protein),
+        fat: round1(target.fat),
+        carbs: round1(target.carbs),
+        salt: round1(target.salt),
         source: 'photo',
         description: target.description || null,
-      } as any;
+      } as any));
 
       if (!isSupabaseConfigured) {
         setStatusMessage('Supabase が未設定です。保存できません。');
         return;
       }
 
-      const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+      const { data, error } = await supabase.from('nutrition_records').insert(inserts).select();
       if (error) {
         console.error('Supabase insert error', error);
         setStatusMessage('保存に失敗しました（ネットワークエラー）。');
-      } else if (data && data[0]) {
-        const r = data[0];
-        const record: NutritionRecord = {
+      } else if (data) {
+        const created = data.map((r: any) => ({
           id: r.id,
-          name: r.name || target.name,
-          amountText: r.amount_text || target.amountText,
-          calories: Number(r.calories) || target.calories,
-          protein: Number(r.protein) || target.protein,
-          fat: Number(r.fat) || target.fat,
-          carbs: Number(r.carbs) || target.carbs,
-          salt: Number(r.salt) || target.salt,
-          description: r.description || target.description,
+          name: r.name || '',
+          amountText: r.amount_text || '',
+          calories: Number(r.calories) || 0,
+          protein: Number(r.protein) || 0,
+          fat: Number(r.fat) || 0,
+          carbs: Number(r.carbs) || 0,
+          salt: Number(r.salt) || 0,
+          description: r.description || '',
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
-          source: r.source || 'photo',
-        };
-        setRecords([record, ...records]);
-        setEstimates((prev) => prev.filter((e) => e.tempId !== target.tempId));
-        setStatusMessage('記録を保存しました。');
+          source: (r.source || 'photo') as NutritionRecord['source'],
+        }));
+        setRecords((prev) => [...created, ...prev]);
+        setEstimates([]);
+        setPendingFoods((prev) => {
+          prev.forEach((item) => {
+            if (item.previewUrl) {
+              URL.revokeObjectURL(item.previewUrl);
+            }
+          });
+          return [];
+        });
+        setStatusMessage(`${created.length}件を保存しました。`);
       }
     } catch (e) {
       console.error(e);
@@ -652,6 +731,10 @@ export default function HomePage() {
             店名・商品名・メーカー名など(任意)
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例: ガスト チーズINハンバーグ" />
           </label>
+
+          <button className="button-secondary" type="button" onClick={addPendingFood}>
+            食品を追加
+          </button>
         </div>
       </div>
 
@@ -682,9 +765,34 @@ export default function HomePage() {
       </div>
 
       <div className="page-card">
-        <h2 className="section-title">栄養推定開始</h2>
+        <h2 className="section-title">推定待ち食品リスト</h2>
+        {pendingFoods.length === 0 ? (
+          <p><small>まだ食品が追加されていません。上の「食品を追加」ボタンから登録してください。</small></p>
+        ) : (
+          <div className="field-grid">
+            {pendingFoods.map((item) => (
+              <div key={item.id} className="pending-row">
+                <div className="pending-main">
+                  <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
+                  <small>{item.mode === 'label' ? `栄養ラベル ${item.consumedGrams}g換算` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
+                </div>
+                <label>
+                  個数
+                  <input type="number" min="0.1" step="0.1" value={item.quantity} onChange={(e) => updatePendingFood(item.id, { quantity: Number(e.target.value) || 1 })} />
+                </label>
+                <label>
+                  倍率
+                  <input type="number" min="0.1" step="0.1" value={item.multiplier} onChange={(e) => updatePendingFood(item.id, { multiplier: Number(e.target.value) || 1 })} />
+                </label>
+                <button type="button" className="button-danger pending-remove" onClick={() => removePendingFood(item.id)}>
+                  削除
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <button className="button-primary" type="button" onClick={handleEstimate} disabled={loading}>
-          {loading ? '推定中...' : '推定開始'}
+          {loading ? '推定中...' : `推定開始（${pendingFoods.length}件）`}
         </button>
         {statusMessage ? <p><small>{statusMessage}</small></p> : null}
       </div>
@@ -700,50 +808,51 @@ export default function HomePage() {
                 <div className="field-grid field-grid-2">
                   <label>
                     料理名
-                    <input value={estimate.name} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, name: e.target.value }))} />
+                    <input value={estimate.name} onChange={(e) => updateEstimate(estimate.tempId, { name: e.target.value })} />
                   </label>
                   <label>
-                    推定量
-                    <input value={estimate.amountText} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, amountText: e.target.value }))} />
+                    推定量の表示
+                    <input value={estimate.amountText} onChange={(e) => updateEstimate(estimate.tempId, { amountText: e.target.value })} />
                   </label>
                   <label>
-                    カロリー(kcal)
-                    <input type="number" value={estimate.calories} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, calories: Number(e.target.value) }))} />
+                    個数
+                    <input type="number" min="0.1" step="0.1" value={estimate.quantity} onChange={(e) => updateEstimate(estimate.tempId, { quantity: Number(e.target.value) || 1 })} />
                   </label>
                   <label>
-                    タンパク質(g)
-                    <input type="number" value={estimate.protein} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, protein: Number(e.target.value) }))} />
+                    倍率
+                    <input type="number" min="0.1" step="0.1" value={estimate.multiplier} onChange={(e) => updateEstimate(estimate.tempId, { multiplier: Number(e.target.value) || 1 })} />
                   </label>
                   <label>
-                    脂質(g)
-                    <input type="number" value={estimate.fat} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, fat: Number(e.target.value) }))} />
+                    基準カロリー(kcal)
+                    <input type="number" value={estimate.baseCalories} onChange={(e) => updateEstimate(estimate.tempId, { baseCalories: Number(e.target.value) || 0 })} />
                   </label>
                   <label>
-                    炭水化物(g)
-                    <input type="number" value={estimate.carbs} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, carbs: Number(e.target.value) }))} />
+                    基準タンパク質(g)
+                    <input type="number" value={estimate.baseProtein} onChange={(e) => updateEstimate(estimate.tempId, { baseProtein: Number(e.target.value) || 0 })} />
                   </label>
                   <label>
-                    食塩相当量(g)
-                    <input type="number" step="0.1" value={estimate.salt} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, salt: Number(e.target.value) }))} />
+                    基準脂質(g)
+                    <input type="number" value={estimate.baseFat} onChange={(e) => updateEstimate(estimate.tempId, { baseFat: Number(e.target.value) || 0 })} />
                   </label>
                   <label>
-                    量の倍率
-                    <div style={{display:'flex', gap:8, alignItems:'center'}}>
-                      <div style={{display:'flex', gap:6}}>
-                        {[0.5,1,1.5,2].map((v) => (
-                          <button key={v} type="button" onClick={() => updateEstimate(estimate.tempId, (prev) => ({ ...prev, multiplier: v }))} style={{padding:'6px 10px', borderRadius:6, background: estimate.multiplier===v ? '#0b74de' : '#eee', color: estimate.multiplier===v ? '#fff' : '#000'}}>{v}x</button>
-                        ))}
-                      </div>
-                      <input type="number" step="0.1" min="0.1" value={estimate.multiplier} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, multiplier: Number(e.target.value) }))} style={{width:100}} />
-                    </div>
+                    基準炭水化物(g)
+                    <input type="number" value={estimate.baseCarbs} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
+                  </label>
+                  <label>
+                    基準食塩相当量(g)
+                    <input type="number" step="0.1" value={estimate.baseSalt} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
                   </label>
                 </div>
-                <button className="button-primary" type="button" onClick={() => saveRecord(estimate)}>
-                  この結果を保存
-                </button>
+                <div className="summary-item" style={{ marginTop: 8 }}>
+                  <span>再計算後</span>
+                  <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 塩 {estimate.salt.toFixed(1)}g</strong>
+                </div>
               </div>
             ))}
           </div>
+          <button className="button-primary" type="button" onClick={saveAllEstimates} disabled={loading}>
+            {loading ? '保存中...' : '保存'}
+          </button>
         </div>
       ) : null}
 

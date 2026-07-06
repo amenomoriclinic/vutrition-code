@@ -256,6 +256,33 @@ small {
   font-size: 0.78rem;
 }
 
+.pending-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 0.8fr auto;
+  gap: 8px;
+  align-items: end;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.pending-main {
+  min-width: 0;
+}
+
+.pending-main strong {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-remove {
+  min-width: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
 .button-danger {
   background: #fef2f2;
   color: #b91c1c;
@@ -286,6 +313,15 @@ small {
 
   .record-kcal {
     font-size: 0.8rem;
+  }
+
+  .pending-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .pending-remove {
+    width: auto;
   }
 
   .button-danger {
