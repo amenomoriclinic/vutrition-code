@@ -20,6 +20,12 @@ type NutritionEstimate = {
   imageUrl?: string;
 };
 
+type EditableEstimate = NutritionEstimate & {
+  tempId: string;
+  fileName: string;
+  multiplier: number;
+};
+
 type NutritionRecord = NutritionEstimate & {
   id: string;
   createdAt: string;
@@ -131,14 +137,13 @@ const activityLabels: Record<ActivityLevel, string> = {
 };
 
 export default function HomePage() {
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string>('');
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [description, setDescription] = useState('');
   const [scanMode, setScanMode] = useState<'food' | 'label'>('food');
   const [consumedGrams, setConsumedGrams] = useState(100);
-  const [quantityMultiplier, setQuantityMultiplier] = useState(1);
   const [exerciseTab, setExerciseTab] = useState<'run' | 'manual' | 'met'>('run');
-  const [estimate, setEstimate] = useState<NutritionEstimate | null>(null);
+  const [estimates, setEstimates] = useState<EditableEstimate[]>([]);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
   const [profile, setProfile] = useState({ age: 35, sex: 'male' as Sex, weight: 60, activity: 'moderate' as ActivityLevel });
@@ -227,13 +232,16 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (photoFile) {
-      const url = URL.createObjectURL(photoFile);
-      setPhotoPreview(url);
-      return () => URL.revokeObjectURL(url);
+    if (photoFiles.length === 0) {
+      setPhotoPreviews([]);
+      return;
     }
-    setPhotoPreview('');
-  }, [photoFile]);
+    const urls = photoFiles.map((f) => URL.createObjectURL(f));
+    setPhotoPreviews(urls);
+    return () => {
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [photoFiles]);
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) => record.createdAt.startsWith(dateFilter));
@@ -291,73 +299,87 @@ export default function HomePage() {
   }, [profile]);
 
   const handlePhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    setPhotoFile(file);
+    const files = Array.from(event.target.files || []);
+    setPhotoFiles(files);
   };
 
   const handleEstimate = async () => {
-    if (!photoFile) {
-      setStatusMessage('写真を選択してください。');
+    if (photoFiles.length === 0) {
+      setStatusMessage('写真を1枚以上選択してください。');
       return;
     }
 
     setLoading(true);
-    setStatusMessage('推定中... Claude APIを呼び出しています。');
-    setEstimate(null);
+    setEstimates([]);
+    setStatusMessage(`推定中... 0/${photoFiles.length}`);
 
     try {
-      const formData = new FormData();
-      formData.append('photo', photoFile);
-      formData.append('description', description);
-      formData.append('mode', scanMode);
-      if (scanMode === 'label') {
-        formData.append('consumedGrams', String(consumedGrams));
+      const next: EditableEstimate[] = [];
+      let successCount = 0;
+
+      for (let i = 0; i < photoFiles.length; i += 1) {
+        const file = photoFiles[i];
+        setStatusMessage(`推定中... ${i + 1}/${photoFiles.length} (${file.name})`);
+
+        const formData = new FormData();
+        formData.append('photo', file);
+        formData.append('description', description);
+        formData.append('mode', scanMode);
+        if (scanMode === 'label') {
+          formData.append('consumedGrams', String(consumedGrams));
+        }
+
+        const response = await fetch('/api/vision', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+        if (!response.ok || result.error) {
+          continue;
+        }
+
+        let estimateResponse: NutritionEstimate;
+        if (result.estimate.mode === 'label') {
+          const baseAmount = Number(result.estimate.baseAmount) || 100;
+          const grams = Number(result.estimate.consumedGrams || consumedGrams) || consumedGrams;
+          const scale = grams / baseAmount;
+          estimateResponse = {
+            name: result.estimate.name || '不明な食品',
+            amountText: `${grams}g`,
+            calories: Math.round((Number(result.estimate.calories) || 0) * scale * 10) / 10,
+            protein: Math.round((Number(result.estimate.protein) || 0) * scale * 10) / 10,
+            fat: Math.round((Number(result.estimate.fat) || 0) * scale * 10) / 10,
+            carbs: Math.round((Number(result.estimate.carbs) || 0) * scale * 10) / 10,
+            salt: Math.round((Number(result.estimate.salt) || 0) * scale * 10) / 10,
+            description: `${description} (${baseAmount}gあたりの栄養表示を${grams}g換算)`,
+            imageUrl: photoPreviews[i],
+          };
+        } else {
+          estimateResponse = {
+            name: result.estimate.name || '不明な料理',
+            amountText: result.estimate.amountText || '1品',
+            calories: Number(result.estimate.calories) || 0,
+            protein: Number(result.estimate.protein) || 0,
+            fat: Number(result.estimate.fat) || 0,
+            carbs: Number(result.estimate.carbs) || 0,
+            salt: Number(result.estimate.salt) || 0,
+            description,
+            imageUrl: photoPreviews[i],
+          };
+        }
+
+        next.push({
+          ...estimateResponse,
+          tempId: `${Date.now()}-${i}`,
+          fileName: file.name,
+          multiplier: 1,
+        });
+        successCount += 1;
       }
 
-      const response = await fetch('/api/vision', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-      if (!response.ok || result.error) {
-        setStatusMessage(result.error || '推定に失敗しました。');
-        setLoading(false);
-        return;
-      }
-
-      let estimateResponse: NutritionEstimate;
-      if (result.estimate.mode === 'label') {
-        const baseAmount = Number(result.estimate.baseAmount) || 100;
-        const grams = Number(result.estimate.consumedGrams || consumedGrams) || consumedGrams;
-        const scale = grams / baseAmount;
-        estimateResponse = {
-          name: result.estimate.name || '不明な食品',
-          amountText: `${grams}g`,
-          calories: Math.round((Number(result.estimate.calories) || 0) * scale * 10) / 10,
-          protein: Math.round((Number(result.estimate.protein) || 0) * scale * 10) / 10,
-          fat: Math.round((Number(result.estimate.fat) || 0) * scale * 10) / 10,
-          carbs: Math.round((Number(result.estimate.carbs) || 0) * scale * 10) / 10,
-          salt: Math.round((Number(result.estimate.salt) || 0) * scale * 10) / 10,
-          description: `${description} (${baseAmount}gあたりの栄養表示を${grams}g換算)`,
-          imageUrl: photoPreview,
-        };
-      } else {
-        estimateResponse = {
-          name: result.estimate.name || '不明な料理',
-          amountText: result.estimate.amountText || '1品',
-          calories: Number(result.estimate.calories) || 0,
-          protein: Number(result.estimate.protein) || 0,
-          fat: Number(result.estimate.fat) || 0,
-          carbs: Number(result.estimate.carbs) || 0,
-          salt: Number(result.estimate.salt) || 0,
-          description,
-          imageUrl: photoPreview,
-        };
-      }
-
-      setEstimate(estimateResponse);
-      setStatusMessage('推定結果を確認して保存してください。');
+      setEstimates(next);
+      setStatusMessage(`推定完了: ${successCount}/${photoFiles.length} 件`);
     } catch (error) {
       setStatusMessage('サーバーに接続できませんでした。');
     } finally {
@@ -365,21 +387,24 @@ export default function HomePage() {
     }
   };
 
-  const saveRecord = async () => {
-    if (!estimate) return;
+  const updateEstimate = (tempId: string, updater: (prev: EditableEstimate) => EditableEstimate) => {
+    setEstimates((prev) => prev.map((e) => (e.tempId === tempId ? updater(e) : e)));
+  };
+
+  const saveRecord = async (target: EditableEstimate) => {
     setLoading(true);
     try {
-      const scale = Number(quantityMultiplier) || 1;
+      const scale = Number(target.multiplier) || 1;
       const insert = {
-        name: estimate.name,
-        amount_text: estimate.amountText,
-        calories: Math.round((estimate.calories || 0) * scale * 10) / 10,
-        protein: Math.round((estimate.protein || 0) * scale * 10) / 10,
-        fat: Math.round((estimate.fat || 0) * scale * 10) / 10,
-        carbs: Math.round((estimate.carbs || 0) * scale * 10) / 10,
-        salt: Math.round((estimate.salt || 0) * scale * 10) / 10,
+        name: target.name,
+        amount_text: target.amountText,
+        calories: Math.round((target.calories || 0) * scale * 10) / 10,
+        protein: Math.round((target.protein || 0) * scale * 10) / 10,
+        fat: Math.round((target.fat || 0) * scale * 10) / 10,
+        carbs: Math.round((target.carbs || 0) * scale * 10) / 10,
+        salt: Math.round((target.salt || 0) * scale * 10) / 10,
         source: 'photo',
-        description: estimate.description || null,
+        description: target.description || null,
       } as any;
 
       if (!isSupabaseConfigured) {
@@ -395,29 +420,26 @@ export default function HomePage() {
         const r = data[0];
         const record: NutritionRecord = {
           id: r.id,
-          name: r.name || estimate.name,
-          amountText: r.amount_text || estimate.amountText,
-          calories: Number(r.calories) || estimate.calories,
-          protein: Number(r.protein) || estimate.protein,
-          fat: Number(r.fat) || estimate.fat,
-          carbs: Number(r.carbs) || estimate.carbs,
-          salt: Number(r.salt) || estimate.salt,
-          description: r.description || estimate.description,
+          name: r.name || target.name,
+          amountText: r.amount_text || target.amountText,
+          calories: Number(r.calories) || target.calories,
+          protein: Number(r.protein) || target.protein,
+          fat: Number(r.fat) || target.fat,
+          carbs: Number(r.carbs) || target.carbs,
+          salt: Number(r.salt) || target.salt,
+          description: r.description || target.description,
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
           source: r.source || 'photo',
         };
         setRecords([record, ...records]);
+        setEstimates((prev) => prev.filter((e) => e.tempId !== target.tempId));
         setStatusMessage('記録を保存しました。');
       }
     } catch (e) {
       console.error(e);
       setStatusMessage('保存中にエラーが発生しました。');
     } finally {
-      setEstimate(null);
-      setPhotoFile(null);
-      setPhotoPreview('');
-      setDescription('');
       setLoading(false);
     }
   };
@@ -538,7 +560,7 @@ export default function HomePage() {
           </div>
           <label>
             写真
-            <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} />
+            <input type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoChange} />
           </label>
           {scanMode === 'label' ? (
             <label>
@@ -546,7 +568,13 @@ export default function HomePage() {
               <input type="number" min="1" value={consumedGrams} onChange={(e) => setConsumedGrams(Number(e.target.value))} />
             </label>
           ) : null}
-          {photoPreview ? <img className="image-preview" src={photoPreview} alt="preview" /> : null}
+          {photoPreviews.length > 0 ? (
+            <div className="card-row">
+              {photoPreviews.map((src, idx) => (
+                <img key={`${src}-${idx}`} className="image-preview" src={src} alt={`preview-${idx + 1}`} style={{ maxWidth: 140 }} />
+              ))}
+            </div>
+          ) : null}
           <label>
             店名・商品名・メーカー名など(任意)
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例: ガスト チーズINハンバーグ" />
@@ -558,53 +586,61 @@ export default function HomePage() {
         </div>
       </div>
 
-        {estimate ? (
+        {estimates.length > 0 ? (
         <div className="page-card">
-          <h2 className="section-title">推定結果の確認と修正</h2>
-          <div className="field-grid field-grid-2">
-            <label>
-              料理名
-              <input value={estimate.name} onChange={(e) => setEstimate({ ...estimate, name: e.target.value })} />
-            </label>
-            <label>
-              推定量
-              <input value={estimate.amountText} onChange={(e) => setEstimate({ ...estimate, amountText: e.target.value })} />
-            </label>
-            <label>
-              カロリー(kcal)
-              <input type="number" value={estimate.calories} onChange={(e) => setEstimate({ ...estimate, calories: Number(e.target.value) })} />
-            </label>
-            <label>
-              タンパク質(g)
-              <input type="number" value={estimate.protein} onChange={(e) => setEstimate({ ...estimate, protein: Number(e.target.value) })} />
-            </label>
-            <label>
-              脂質(g)
-              <input type="number" value={estimate.fat} onChange={(e) => setEstimate({ ...estimate, fat: Number(e.target.value) })} />
-            </label>
-            <label>
-              炭水化物(g)
-              <input type="number" value={estimate.carbs} onChange={(e) => setEstimate({ ...estimate, carbs: Number(e.target.value) })} />
-            </label>
-            <label>
-              食塩相当量(g)
-              <input type="number" step="0.1" value={estimate.salt} onChange={(e) => setEstimate({ ...estimate, salt: Number(e.target.value) })} />
-            </label>
-            <label>
-              量の倍率
-              <div style={{display:'flex', gap:8, alignItems:'center'}}>
-                <div style={{display:'flex', gap:6}}>
-                  {[0.5,1,1.5,2].map((v) => (
-                    <button key={v} type="button" onClick={() => setQuantityMultiplier(v)} style={{padding:'6px 10px', borderRadius:6, background: quantityMultiplier===v ? '#0b74de' : '#eee', color: quantityMultiplier===v ? '#fff' : '#000'}}>{v}x</button>
-                  ))}
+          <h2 className="section-title">推定結果の確認と修正（{estimates.length}件）</h2>
+          <div className="field-grid">
+            {estimates.map((estimate) => (
+              <div key={estimate.tempId} className="page-card" style={{ marginBottom: 8 }}>
+                <p><small>{estimate.fileName}</small></p>
+                {estimate.imageUrl ? <img className="image-preview" src={estimate.imageUrl} alt={estimate.fileName} style={{ maxWidth: 220 }} /> : null}
+                <div className="field-grid field-grid-2">
+                  <label>
+                    料理名
+                    <input value={estimate.name} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, name: e.target.value }))} />
+                  </label>
+                  <label>
+                    推定量
+                    <input value={estimate.amountText} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, amountText: e.target.value }))} />
+                  </label>
+                  <label>
+                    カロリー(kcal)
+                    <input type="number" value={estimate.calories} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, calories: Number(e.target.value) }))} />
+                  </label>
+                  <label>
+                    タンパク質(g)
+                    <input type="number" value={estimate.protein} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, protein: Number(e.target.value) }))} />
+                  </label>
+                  <label>
+                    脂質(g)
+                    <input type="number" value={estimate.fat} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, fat: Number(e.target.value) }))} />
+                  </label>
+                  <label>
+                    炭水化物(g)
+                    <input type="number" value={estimate.carbs} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, carbs: Number(e.target.value) }))} />
+                  </label>
+                  <label>
+                    食塩相当量(g)
+                    <input type="number" step="0.1" value={estimate.salt} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, salt: Number(e.target.value) }))} />
+                  </label>
+                  <label>
+                    量の倍率
+                    <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                      <div style={{display:'flex', gap:6}}>
+                        {[0.5,1,1.5,2].map((v) => (
+                          <button key={v} type="button" onClick={() => updateEstimate(estimate.tempId, (prev) => ({ ...prev, multiplier: v }))} style={{padding:'6px 10px', borderRadius:6, background: estimate.multiplier===v ? '#0b74de' : '#eee', color: estimate.multiplier===v ? '#fff' : '#000'}}>{v}x</button>
+                        ))}
+                      </div>
+                      <input type="number" step="0.1" min="0.1" value={estimate.multiplier} onChange={(e) => updateEstimate(estimate.tempId, (prev) => ({ ...prev, multiplier: Number(e.target.value) }))} style={{width:100}} />
+                    </div>
+                  </label>
                 </div>
-                <input type="number" step="0.1" min="0.1" value={quantityMultiplier} onChange={(e) => setQuantityMultiplier(Number(e.target.value))} style={{width:100}} />
+                <button className="button-primary" type="button" onClick={() => saveRecord(estimate)}>
+                  この結果を保存
+                </button>
               </div>
-            </label>
+            ))}
           </div>
-          <button className="button-primary" type="button" onClick={saveRecord}>
-            記録として保存する
-          </button>
         </div>
       ) : null}
 
