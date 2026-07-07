@@ -64,6 +64,20 @@ type FavoriteFood = {
   salt: number;
 };
 
+type NutritionRecordInsert = {
+  name: string;
+  amount_text: string | null;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  salt: number;
+  multiplier?: number;
+  source?: string;
+  description?: string | null;
+  image_url?: string | null;
+};
+
 const isExerciseSource = (source: unknown) => String(source ?? '').trim().toLowerCase() === 'exercise';
 const JST_OFFSET_MINUTES = 9 * 60;
 
@@ -326,6 +340,11 @@ export default function HomePage() {
 
   const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 
+  const formatSupabaseError = (error: any) => {
+    if (!error) return '不明なエラー';
+    return [error.message, error.details, error.hint].filter(Boolean).join(' / ');
+  };
+
   const recalcEstimate = (estimate: EditableEstimate): EditableEstimate => {
     const quantity = Math.max(0.1, Number(estimate.quantity) || 1);
     const multiplier = Math.max(0.1, Number(estimate.multiplier) || 1);
@@ -517,9 +536,10 @@ export default function HomePage() {
 
     setLoading(true);
     try {
-      const inserts = estimates.map((target) => ({
+      // Keep keys aligned with nutrition_records snake_case columns.
+      const inserts: NutritionRecordInsert[] = estimates.map((target) => ({
         name: target.name,
-        amount_text: target.amountText,
+        amount_text: target.amountText || null,
         calories: round1(target.calories),
         protein: round1(target.protein),
         fat: round1(target.fat),
@@ -528,17 +548,42 @@ export default function HomePage() {
         multiplier: round1((target.quantity || 1) * (target.multiplier || 1)),
         source: 'photo',
         description: target.description || null,
-      } as any));
+        image_url: target.imageUrl || null,
+      }));
 
       if (!isSupabaseConfigured) {
         setStatusMessage('Supabase が未設定です。保存できません。');
         return;
       }
 
-      const { data, error } = await supabase.from('nutrition_records').insert(inserts).select();
+      let { data, error } = await supabase.from('nutrition_records').insert(inserts).select();
+
+      if (error) {
+        const message = formatSupabaseError(error).toLowerCase();
+        const mayBeSchemaMismatch = /column|schema cache|does not exist|unknown/.test(message);
+
+        if (mayBeSchemaMismatch) {
+          // Fallback for older DB schemas: use minimum columns that are typically present.
+          const fallbackInserts = inserts.map((target) => ({
+            name: target.name,
+            amount_text: target.amount_text,
+            calories: target.calories,
+            protein: target.protein,
+            fat: target.fat,
+            carbs: target.carbs,
+            salt: target.salt,
+            description: target.description || null,
+          }));
+
+          const fallbackResult = await supabase.from('nutrition_records').insert(fallbackInserts).select();
+          data = fallbackResult.data;
+          error = fallbackResult.error;
+        }
+      }
+
       if (error) {
         console.error('Supabase insert error', error);
-        setStatusMessage('保存に失敗しました（ネットワークエラー）。');
+        setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
       } else if (data) {
         const created = data.map((r: any) => ({
           id: r.id,
