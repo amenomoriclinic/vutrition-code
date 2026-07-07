@@ -49,6 +49,7 @@ type PendingFood = {
 type NutritionRecord = NutritionEstimate & {
   id: string;
   createdAt: string;
+  createdAtRaw?: string;
   multiplier: number;
   source: 'photo' | 'favorite' | 'exercise';
 };
@@ -78,7 +79,16 @@ type NutritionRecordInsert = {
   image_url?: string | null;
 };
 
-const isExerciseSource = (source: unknown) => String(source ?? '').trim().toLowerCase() === 'exercise';
+const normalizeSource = (source: unknown) => String(source ?? '').trim().toLowerCase();
+
+const isExerciseSource = (source: unknown) => normalizeSource(source) === 'exercise';
+
+const isExerciseRecord = (record: Pick<NutritionRecord, 'source' | 'name' | 'description'>) => {
+  if (isExerciseSource(record.source)) return true;
+  const name = String(record.name || '').toLowerCase();
+  const description = String(record.description || '').toLowerCase();
+  return /ランニング|筋トレ|運動|exercise/.test(name) || /met|exercise/.test(description);
+};
 const jstDateFormatter = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Tokyo',
   year: 'numeric',
@@ -260,8 +270,9 @@ export default function HomePage() {
             description: r.description || '',
             imageUrl: r.image_url || undefined,
             createdAt: toJstDateString(r.created_at),
+            createdAtRaw: r.created_at || undefined,
             multiplier: Number(r.multiplier) || 1,
-            source: (String(r.source || 'photo').toLowerCase() as NutritionRecord['source']),
+            source: (normalizeSource(r.source || 'photo') as NutritionRecord['source']),
           }));
           setRecords(mapped as NutritionRecord[]);
         }
@@ -284,14 +295,17 @@ export default function HomePage() {
   }, [photoFiles]);
 
   const filteredRecords = useMemo(() => {
-    return records.filter((record) => record.createdAt.startsWith(dateFilter));
+    return records.filter((record) => {
+      const jstDate = toJstDateString(record.createdAtRaw || record.createdAt);
+      return jstDate === dateFilter;
+    });
   }, [records, dateFilter]);
 
   const totals = useMemo(() => {
     // intake totals only (exclude exercise records)
     return filteredRecords.reduce(
       (acc, record) => {
-        if (!isExerciseSource(record.source)) {
+        if (!isExerciseRecord(record)) {
           acc.calories += record.calories;
           acc.protein += record.protein;
           acc.fat += record.fat;
@@ -306,7 +320,7 @@ export default function HomePage() {
 
   const exerciseCalories = useMemo(() => {
     return filteredRecords.reduce(
-      (acc, record) => (isExerciseSource(record.source) ? acc + (record.calories || 0) : acc),
+      (acc, record) => (isExerciseRecord(record) ? acc + (record.calories || 0) : acc),
       0
     );
   }, [filteredRecords]);
@@ -385,8 +399,9 @@ export default function HomePage() {
     description: row.description || fallback?.description || '',
     imageUrl: row.image_url || fallback?.imageUrl || undefined,
     createdAt: toJstDateString(row.created_at),
+    createdAtRaw: row.created_at || undefined,
     multiplier: Number(row.multiplier) || fallback?.multiplier || 1,
-    source: (row.source || fallback?.source || 'exercise') as NutritionRecord['source'],
+    source: (normalizeSource(row.source || fallback?.source || 'exercise') as NutritionRecord['source']),
   });
 
   const recalcEstimate = (estimate: EditableEstimate): EditableEstimate => {
