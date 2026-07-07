@@ -79,16 +79,16 @@ type NutritionRecordInsert = {
 };
 
 const isExerciseSource = (source: unknown) => String(source ?? '').trim().toLowerCase() === 'exercise';
-const JST_OFFSET_MINUTES = 9 * 60;
+const jstDateFormatter = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Tokyo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 
 const toJstDateString = (input?: string | Date | null) => {
   const d = input ? new Date(input) : new Date();
-  const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
-  const jst = new Date(utcMs + JST_OFFSET_MINUTES * 60000);
-  const y = jst.getFullYear();
-  const m = String(jst.getMonth() + 1).padStart(2, '0');
-  const day = String(jst.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return jstDateFormatter.format(d);
 };
 
 const isValidFavorite = (v: any): v is FavoriteFood => {
