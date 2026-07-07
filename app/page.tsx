@@ -373,6 +373,22 @@ export default function HomePage() {
     return { data, error };
   };
 
+  const mapNutritionRecord = (row: any, fallback?: Partial<NutritionRecord>): NutritionRecord => ({
+    id: row.id,
+    name: row.name || fallback?.name || '',
+    amountText: row.amount_text || fallback?.amountText || '',
+    calories: Number(row.calories) || fallback?.calories || 0,
+    protein: Number(row.protein) || fallback?.protein || 0,
+    fat: Number(row.fat) || fallback?.fat || 0,
+    carbs: Number(row.carbs) || fallback?.carbs || 0,
+    salt: Number(row.salt) || fallback?.salt || 0,
+    description: row.description || fallback?.description || '',
+    imageUrl: row.image_url || fallback?.imageUrl || undefined,
+    createdAt: toJstDateString(row.created_at),
+    multiplier: Number(row.multiplier) || fallback?.multiplier || 1,
+    source: (row.source || fallback?.source || 'exercise') as NutritionRecord['source'],
+  });
+
   const recalcEstimate = (estimate: EditableEstimate): EditableEstimate => {
     const quantity = Math.max(0.1, Number(estimate.quantity) || 1);
     const multiplier = Math.max(0.1, Number(estimate.multiplier) || 1);
@@ -1006,11 +1022,11 @@ export default function HomePage() {
                 const km = el ? Number(el.value) : 0;
                 if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
                 const caloriesBurned = Math.round(profile.weight * km * 1.036);
-                const insert = { name: `ランニング ${km} km`, calories: caloriesBurned, protein: 0, fat:0, carbs:0, salt:0, multiplier: 1, source: 'exercise', description: null } as any;
+                const insert: NutritionRecordInsert = { name: `ランニング ${km} km`, amount_text: null, calories: caloriesBurned, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-                const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
-                if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), multiplier: Number(r.multiplier) || 1, source:'exercise' }, ...records]); setStatusMessage('ランニング記録を保存しました。'); }
+                const { data, error } = await insertNutritionRecordsWithFallback([insert]);
+                if (error) { console.error(error); setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`); return; }
+                if (data && data[0]) { const record = mapNutritionRecord(data[0], { name: insert.name, calories: insert.calories, protein: insert.protein, fat: insert.fat, carbs: insert.carbs, salt: insert.salt, multiplier: insert.multiplier, source: 'exercise' }); setRecords((prev) => [record, ...prev]); setStatusMessage('ランニング記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
@@ -1021,11 +1037,11 @@ export default function HomePage() {
                 const el = document.getElementById('manual-cal') as HTMLInputElement | null;
                 const kcal = el ? Math.round(Number(el.value)) : 0;
                 if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
-                const insert = { name: `運動（手動）`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, multiplier: 1, source:'exercise', description:null } as any;
+                const insert: NutritionRecordInsert = { name: `運動（手動）`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-                const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
-                if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), multiplier: Number(r.multiplier) || 1, source:'exercise' }, ...records]); setStatusMessage('運動記録を保存しました。'); }
+                const { data, error } = await insertNutritionRecordsWithFallback([insert]);
+                if (error) { console.error(error); setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`); return; }
+                if (data && data[0]) { const record = mapNutritionRecord(data[0], { name: insert.name, calories: insert.calories, protein: insert.protein, fat: insert.fat, carbs: insert.carbs, salt: insert.salt, multiplier: insert.multiplier, source: 'exercise' }); setRecords((prev) => [record, ...prev]); setStatusMessage('運動記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
@@ -1045,11 +1061,11 @@ export default function HomePage() {
                 if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
                 const hours = min / 60;
                 const kcal = Math.round(met * profile.weight * hours);
-                const insert = { name: `筋トレ ${min}分`, calories: kcal, protein:0, fat:0, carbs:0, salt:0, multiplier: 1, source:'exercise', description:`MET ${met}` } as any;
+                const insert: NutritionRecordInsert = { name: `筋トレ ${min}分`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: `MET ${met}`, image_url: null };
                 if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-                const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
-                if (error) { console.error(error); setStatusMessage('保存に失敗しました。'); return; }
-                if (data && data[0]) { const r = data[0]; setRecords([{ id: r.id, name: r.name, amountText: r.amount_text||'', calories: Number(r.calories)||0, protein:0, fat:0, carbs:0, salt:0, description:r.description||'', imageUrl: r.image_url||undefined, createdAt: toJstDateString(r.created_at), multiplier: Number(r.multiplier) || 1, source:'exercise' }, ...records]); setStatusMessage('筋トレ記録を保存しました。'); }
+                const { data, error } = await insertNutritionRecordsWithFallback([insert]);
+                if (error) { console.error(error); setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`); return; }
+                if (data && data[0]) { const record = mapNutritionRecord(data[0], { name: insert.name, calories: insert.calories, protein: insert.protein, fat: insert.fat, carbs: insert.carbs, salt: insert.salt, multiplier: insert.multiplier, source: 'exercise' }); setRecords((prev) => [record, ...prev]); setStatusMessage('筋トレ記録を保存しました。'); }
               }}>保存</button>
             </div>
           )}
