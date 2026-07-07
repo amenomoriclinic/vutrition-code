@@ -345,6 +345,34 @@ export default function HomePage() {
     return [error.message, error.details, error.hint].filter(Boolean).join(' / ');
   };
 
+  const insertNutritionRecordsWithFallback = async (rows: NutritionRecordInsert[]) => {
+    let { data, error } = await supabase.from('nutrition_records').insert(rows).select();
+
+    if (error) {
+      const message = formatSupabaseError(error).toLowerCase();
+      const mayBeSchemaMismatch = /column|schema cache|does not exist|unknown/.test(message);
+
+      if (mayBeSchemaMismatch) {
+        const fallbackRows = rows.map((target) => ({
+          name: target.name,
+          amount_text: target.amount_text,
+          calories: target.calories,
+          protein: target.protein,
+          fat: target.fat,
+          carbs: target.carbs,
+          salt: target.salt,
+          description: target.description || null,
+        }));
+
+        const fallbackResult = await supabase.from('nutrition_records').insert(fallbackRows).select();
+        data = fallbackResult.data;
+        error = fallbackResult.error;
+      }
+    }
+
+    return { data, error };
+  };
+
   const recalcEstimate = (estimate: EditableEstimate): EditableEstimate => {
     const quantity = Math.max(0.1, Number(estimate.quantity) || 1);
     const multiplier = Math.max(0.1, Number(estimate.multiplier) || 1);
@@ -556,30 +584,7 @@ export default function HomePage() {
         return;
       }
 
-      let { data, error } = await supabase.from('nutrition_records').insert(inserts).select();
-
-      if (error) {
-        const message = formatSupabaseError(error).toLowerCase();
-        const mayBeSchemaMismatch = /column|schema cache|does not exist|unknown/.test(message);
-
-        if (mayBeSchemaMismatch) {
-          // Fallback for older DB schemas: use minimum columns that are typically present.
-          const fallbackInserts = inserts.map((target) => ({
-            name: target.name,
-            amount_text: target.amount_text,
-            calories: target.calories,
-            protein: target.protein,
-            fat: target.fat,
-            carbs: target.carbs,
-            salt: target.salt,
-            description: target.description || null,
-          }));
-
-          const fallbackResult = await supabase.from('nutrition_records').insert(fallbackInserts).select();
-          data = fallbackResult.data;
-          error = fallbackResult.error;
-        }
-      }
+      const { data, error } = await insertNutritionRecordsWithFallback(inserts);
 
       if (error) {
         console.error('Supabase insert error', error);
@@ -621,9 +626,9 @@ export default function HomePage() {
   };
 
   const addFavoriteRecord = async (favorite: FavoriteFood) => {
-    const insert = {
+    const insert: NutritionRecordInsert = {
       name: favorite.name,
-      amount_text: favorite.amountText,
+      amount_text: favorite.amountText || null,
       calories: favorite.calories,
       protein: favorite.protein,
       fat: favorite.fat,
@@ -632,17 +637,17 @@ export default function HomePage() {
       multiplier: 1,
       source: 'favorite',
       description: favorite.name,
-    } as any;
+    };
     try {
       if (!isSupabaseConfigured) {
         setStatusMessage('Supabase が未設定です。保存できません。');
         return;
       }
 
-      const { data, error } = await supabase.from('nutrition_records').insert([insert]).select();
+      const { data, error } = await insertNutritionRecordsWithFallback([insert]);
       if (error) {
         console.error('Supabase insert error', error);
-        setStatusMessage('保存に失敗しました。');
+        setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
       } else if (data && data[0]) {
         const r = data[0];
         const record: NutritionRecord = {
@@ -660,7 +665,7 @@ export default function HomePage() {
           multiplier: Number(r.multiplier) || 1,
           source: r.source || 'favorite',
         };
-        setRecords([record, ...records]);
+        setRecords((prev) => [record, ...prev]);
         setStatusMessage(`${favorite.name} を記録しました。`);
       }
     } catch (e) {
