@@ -846,10 +846,13 @@ export default function HomePage() {
     console.info('[multiplier:update] request', { id, payload });
 
     try {
-      const { error, count } = await supabase
+      const { data, error, count } = await supabase
         .from('nutrition_records')
         .update(payload, { count: 'exact' })
-        .eq('id', id);
+        .eq('id', id)
+        .select('id,multiplier');
+
+      console.info('[multiplier:update] response', { id, count, dataLength: data?.length ?? 0, error });
 
       if (error) {
         console.error('[multiplier:update] query error', { id, payload, error });
@@ -866,11 +869,35 @@ export default function HomePage() {
         return false;
       }
 
-      if (typeof count === 'number' && count === 0) {
-        console.warn('[multiplier:update] no rows updated', { id, payload, count });
-      } else {
-        console.info('[multiplier:update] success', { id, payload, count });
+      const updatedRow = Array.isArray(data) ? data[0] : undefined;
+      const updatedMultiplier = Number(updatedRow?.multiplier);
+      const expectedMultiplier = Number(payload.multiplier);
+
+      if (!updatedRow || !Number.isFinite(updatedMultiplier) || Math.abs(updatedMultiplier - expectedMultiplier) > 0.0001) {
+        const verify = await supabase
+          .from('nutrition_records')
+          .select('id,multiplier,source,created_at')
+          .eq('id', id)
+          .maybeSingle();
+
+        console.error('[multiplier:update] verification failed', {
+          id,
+          expectedMultiplier,
+          updatedRow,
+          count,
+          verifyData: verify.data,
+          verifyError: verify.error,
+        });
+
+        if (previousRecord) {
+          setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
+        }
+
+        setStatusMessage('倍率の保存に失敗しました。RLSポリシーまたは更新権限を確認してください。');
+        return false;
       }
+
+      console.info('[multiplier:update] success', { id, payload, count, updatedMultiplier });
 
       return true;
     } catch (e) {
