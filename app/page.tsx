@@ -7,6 +7,8 @@ import { getDRI } from '../lib/dri';
 
 type Sex = 'male' | 'female';
 type ActivityLevel = 'low' | 'moderate' | 'high';
+type LabelDisplayUnit = 'per100g' | 'perPiece' | 'per100ml' | 'perServing';
+type LabelAmountUnit = 'g' | 'ml' | '個' | '食分';
 
 type NutritionEstimate = {
   name: string;
@@ -42,6 +44,11 @@ type PendingFood = {
   foodAmount?: string;
   description: string;
   consumedGrams: number;
+  labelDisplayUnit: LabelDisplayUnit;
+  labelBaseAmount: number;
+  labelBaseUnit: LabelAmountUnit;
+  actualAmount: number;
+  actualUnit: LabelAmountUnit;
   quantity: number;
   multiplier: number;
 };
@@ -181,12 +188,22 @@ const activityLabels: Record<ActivityLevel, string> = {
   high: '高い(運動習慣あり)',
 };
 
+const labelDisplayUnitOptions: Record<LabelDisplayUnit, { label: string; baseAmount: number; baseUnit: LabelAmountUnit; defaultActualUnit: LabelAmountUnit }> = {
+  per100g: { label: '100gあたり', baseAmount: 100, baseUnit: 'g', defaultActualUnit: 'g' },
+  perPiece: { label: '1個（1本・1袋）あたり', baseAmount: 1, baseUnit: '個', defaultActualUnit: '個' },
+  per100ml: { label: '100mlあたり', baseAmount: 100, baseUnit: 'ml', defaultActualUnit: 'ml' },
+  perServing: { label: '1食分あたり', baseAmount: 1, baseUnit: '食分', defaultActualUnit: '食分' },
+};
+
 export default function HomePage() {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [description, setDescription] = useState('');
   const [scanMode, setScanMode] = useState<'food' | 'label' | 'text'>('food');
   const [consumedGrams, setConsumedGrams] = useState(100);
+  const [labelDisplayUnit, setLabelDisplayUnit] = useState<LabelDisplayUnit>('per100g');
+  const [actualAmount, setActualAmount] = useState(100);
+  const [actualUnit, setActualUnit] = useState<LabelAmountUnit>('g');
   const [exerciseTab, setExerciseTab] = useState<'run' | 'manual' | 'met'>('run');
   const [estimates, setEstimates] = useState<EditableEstimate[]>([]);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
@@ -425,6 +442,16 @@ export default function HomePage() {
     setPhotoFiles(files);
   };
 
+  const updateLabelDisplayUnit = (nextUnit: LabelDisplayUnit) => {
+    const meta = labelDisplayUnitOptions[nextUnit];
+    setLabelDisplayUnit(nextUnit);
+    setActualUnit(meta.defaultActualUnit);
+    setActualAmount(meta.baseAmount);
+    if (meta.baseUnit === 'g') {
+      setConsumedGrams(meta.baseAmount);
+    }
+  };
+
   const addPendingFood = () => {
     if (scanMode === 'text') {
       if (!textFoodName.trim()) {
@@ -439,6 +466,11 @@ export default function HomePage() {
         foodAmount: textFoodAmount.trim(),
         description,
         consumedGrams,
+        labelDisplayUnit,
+        labelBaseAmount: labelDisplayUnitOptions[labelDisplayUnit].baseAmount,
+        labelBaseUnit: labelDisplayUnitOptions[labelDisplayUnit].baseUnit,
+        actualAmount,
+        actualUnit,
         quantity: 1,
         multiplier: 1,
       };
@@ -462,6 +494,11 @@ export default function HomePage() {
       previewUrl: URL.createObjectURL(file),
       description,
       consumedGrams,
+      labelDisplayUnit,
+      labelBaseAmount: labelDisplayUnitOptions[labelDisplayUnit].baseAmount,
+      labelBaseUnit: labelDisplayUnitOptions[labelDisplayUnit].baseUnit,
+      actualAmount,
+      actualUnit,
       quantity: 1,
       multiplier: 1,
     } as PendingFood));
@@ -514,6 +551,11 @@ export default function HomePage() {
         }
         if (item.mode === 'label') {
           formData.append('consumedGrams', String(item.consumedGrams));
+          formData.append('labelDisplayUnit', item.labelDisplayUnit);
+          formData.append('labelBaseAmount', String(item.labelBaseAmount));
+          formData.append('labelBaseUnit', item.labelBaseUnit);
+          formData.append('actualAmount', String(item.actualAmount));
+          formData.append('actualUnit', item.actualUnit);
         }
 
         const response = await fetch('/api/vision', {
@@ -528,18 +570,20 @@ export default function HomePage() {
 
         let estimateResponse: NutritionEstimate;
         if (result.estimate.mode === 'label') {
-          const baseAmount = Number(result.estimate.baseAmount) || 100;
-          const grams = Number(result.estimate.consumedGrams || item.consumedGrams) || item.consumedGrams;
-          const scale = grams / baseAmount;
+          const selectedBaseAmount = Math.max(0.1, Number(item.labelBaseAmount) || 100);
+          const selectedBaseUnit = item.labelBaseUnit;
+          const intakeAmount = Math.max(0.1, Number(item.actualAmount) || selectedBaseAmount);
+          const intakeUnit = item.actualUnit;
+          const scale = intakeAmount / selectedBaseAmount;
           estimateResponse = {
             name: result.estimate.name || '不明な食品',
-            amountText: `${grams}g`,
+            amountText: `${intakeAmount}${intakeUnit}`,
             calories: Math.round((Number(result.estimate.calories) || 0) * scale * 10) / 10,
             protein: Math.round((Number(result.estimate.protein) || 0) * scale * 10) / 10,
             fat: Math.round((Number(result.estimate.fat) || 0) * scale * 10) / 10,
             carbs: Math.round((Number(result.estimate.carbs) || 0) * scale * 10) / 10,
             salt: Math.round((Number(result.estimate.salt) || 0) * scale * 10) / 10,
-            description: `${item.description} (${baseAmount}gあたりの栄養表示を${grams}g換算)`,
+            description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示を${intakeAmount}${intakeUnit}換算)`,
             imageUrl: item.previewUrl,
           };
         } else {
@@ -863,10 +907,51 @@ export default function HomePage() {
           ) : null}
 
           {scanMode === 'label' ? (
-            <label>
-              食べた量 (g)
-              <input type="number" min="1" value={consumedGrams} onChange={(e) => setConsumedGrams(Number(e.target.value))} />
-            </label>
+            <div className="field-grid field-grid-3">
+              <label>
+                表示単位
+                <select value={labelDisplayUnit} onChange={(e) => updateLabelDisplayUnit(e.target.value as LabelDisplayUnit)}>
+                  <option value="per100g">100gあたり</option>
+                  <option value="perPiece">1個（1本・1袋）あたり</option>
+                  <option value="per100ml">100mlあたり</option>
+                  <option value="perServing">1食分あたり</option>
+                </select>
+              </label>
+              <label>
+                実際に食べた量
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={actualAmount}
+                  onChange={(e) => {
+                    const next = Number(e.target.value) || 0;
+                    setActualAmount(next);
+                    if (actualUnit === 'g') {
+                      setConsumedGrams(next);
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                入力単位
+                <select
+                  value={actualUnit}
+                  onChange={(e) => {
+                    const next = e.target.value as LabelAmountUnit;
+                    setActualUnit(next);
+                    if (next === 'g') {
+                      setConsumedGrams(actualAmount);
+                    }
+                  }}
+                >
+                  <option value="g">g（固形）</option>
+                  <option value="ml">ml（液体）</option>
+                  <option value="個">個（個数）</option>
+                  <option value="食分">食分</option>
+                </select>
+              </label>
+            </div>
           ) : null}
 
           {scanMode === 'text' ? (
@@ -937,7 +1022,7 @@ export default function HomePage() {
               <div key={item.id} className="pending-row">
                 <div className="pending-main">
                   <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
-                  <small>{item.mode === 'label' ? `栄養ラベル ${item.consumedGrams}g換算` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
+                  <small>{item.mode === 'label' ? `栄養ラベル ${labelDisplayUnitOptions[item.labelDisplayUnit].label} / 実際 ${item.actualAmount}${item.actualUnit}` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
                 </div>
                 <label>
                   個数

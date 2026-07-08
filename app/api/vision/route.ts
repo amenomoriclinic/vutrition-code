@@ -14,6 +14,19 @@ export async function POST(request: Request) {
   const foodName = String(formData.get('foodName') || '').trim();
   const foodAmount = String(formData.get('foodAmount') || '').trim();
   const consumedGrams = Number(formData.get('consumedGrams') || 100);
+  const labelDisplayUnit = String(formData.get('labelDisplayUnit') || 'per100g');
+  const labelBaseAmount = Number(formData.get('labelBaseAmount') || 100);
+  const labelBaseUnit = String(formData.get('labelBaseUnit') || 'g').trim();
+  const actualAmount = Number(formData.get('actualAmount') || labelBaseAmount || 100);
+  const actualUnit = String(formData.get('actualUnit') || labelBaseUnit || 'g').trim();
+
+  const unitText = labelDisplayUnit === 'perPiece'
+    ? '1個（1本・1袋）あたり'
+    : labelDisplayUnit === 'per100ml'
+      ? '100mlあたり'
+      : labelDisplayUnit === 'perServing'
+        ? '1食分あたり'
+        : '100gあたり';
 
   if (mode !== 'text' && (!photo || !(photo instanceof File))) {
     return NextResponse.json({ error: 'Photo is required.' }, { status: 400 });
@@ -22,7 +35,7 @@ export async function POST(request: Request) {
   const prompt = mode === 'text'
     ? `次の食品名・料理名から、一般的な日本の食品データベースを参考に、おおよその栄養素を推定してJSONだけを返してください。正確な商品名でなくても、類似品や一般的な分量を使って推定してください。入力: 食品名/料理名="${foodName || '不明'}", 量="${foodAmount || '未指定'}", 補足="${description || 'なし'}"。\n必ず以下の形式のJSONのみ返してください:\n{"name":"食品名","amountText":"1人前","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
     : mode === 'label'
-      ? `この画像には食品パッケージの栄養成分表示が写っています。以下のJSONだけを返してください。食品名、栄養表示の基準量、100gあたりの栄養素値、または栄養表示の量を読み取ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"100gあたり","baseAmount":100,"baseUnit":"g","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
+      ? `この画像には食品パッケージの栄養成分表示が写っています。次の表示単位で栄養値を読み取ってください: ${unitText}（=${labelBaseAmount}${labelBaseUnit}あたり）。実際に食べた量は ${actualAmount}${actualUnit} です。栄養値は表示単位あたりの値を返し、換算は行わないでください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"${unitText}","baseAmount":${labelBaseAmount},"baseUnit":"${labelBaseUnit}","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
       : `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`;
 
   const contentParts = mode === 'text'
@@ -73,6 +86,9 @@ export async function POST(request: Request) {
     if (mode === 'label') {
       parsed.mode = 'label';
       parsed.consumedGrams = consumedGrams;
+      parsed.baseAmount = Number(parsed.baseAmount) || labelBaseAmount;
+      parsed.baseUnit = String(parsed.baseUnit || labelBaseUnit);
+      parsed.amountText = String(parsed.amountText || unitText);
     }
     return NextResponse.json({ estimate: parsed });
   } catch {
