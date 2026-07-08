@@ -843,36 +843,44 @@ export default function HomePage() {
       multiplier: updatedRecord.multiplier,
     };
 
-    const { data, error } = await supabase
-      .from('nutrition_records')
-      .update(payload)
-      .eq('id', id)
-      .select('id,multiplier')
-      .single();
+    console.info('[multiplier:update] request', { id, payload });
 
-    if (error) {
-      console.error('Supabase multiplier update error', error);
+    try {
+      const { error, count } = await supabase
+        .from('nutrition_records')
+        .update(payload, { count: 'exact' })
+        .eq('id', id);
+
+      if (error) {
+        console.error('[multiplier:update] query error', { id, payload, error });
+        if (previousRecord) {
+          setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
+        }
+        const message = formatSupabaseError(error).toLowerCase();
+        const missingMultiplierColumn = /multiplier/.test(message) && /column|does not exist|schema cache/.test(message);
+        if (missingMultiplierColumn) {
+          setStatusMessage('倍率列が見つかりません。db/supabase_create_table.sql の ALTER TABLE を実行してください。');
+        } else {
+          setStatusMessage(`倍率の保存に失敗しました: ${formatSupabaseError(error)}`);
+        }
+        return false;
+      }
+
+      if (typeof count === 'number' && count === 0) {
+        console.warn('[multiplier:update] no rows updated', { id, payload, count });
+      } else {
+        console.info('[multiplier:update] success', { id, payload, count });
+      }
+
+      return true;
+    } catch (e) {
+      console.error('[multiplier:update] unexpected error', { id, payload, error: e });
       if (previousRecord) {
         setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
       }
-      const message = formatSupabaseError(error).toLowerCase();
-      const missingMultiplierColumn = /multiplier/.test(message) && /column|does not exist|schema cache/.test(message);
-      if (missingMultiplierColumn) {
-        setStatusMessage('倍率列が見つかりません。db/supabase_create_table.sql の ALTER TABLE を実行してください。');
-      } else {
-        setStatusMessage(`倍率の保存に失敗しました: ${formatSupabaseError(error)}`);
-      }
+      setStatusMessage('倍率の保存中に予期しないエラーが発生しました。');
       return false;
     }
-
-    if (data && Number(data.multiplier) > 0) {
-      setRecords((prev) => prev.map((record) => {
-        if (record.id !== id) return record;
-        return { ...record, multiplier: Number(data.multiplier) };
-      }));
-    }
-
-    return true;
   };
 
   const handleRecordMultiplierInput = (id: string, rawValue: string) => {
