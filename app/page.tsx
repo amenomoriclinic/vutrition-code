@@ -813,7 +813,7 @@ export default function HomePage() {
     };
   };
 
-  const updateRecordMultiplier = async (id: string, value: number) => {
+  const updateRecordMultiplier = async (id: string, value: number): Promise<boolean> => {
     const nextMultiplier = Math.max(0.1, Number(value) || 1);
     let previousRecord: NutritionRecord | undefined;
     let updatedRecord: NutritionRecord | undefined;
@@ -826,12 +826,12 @@ export default function HomePage() {
     }));
 
     if (!updatedRecord) {
-      return;
+      return false;
     }
 
     if (!isSupabaseConfigured) {
       setStatusMessage('Supabase が未設定です。倍率を保存できません。');
-      return;
+      return false;
     }
 
     const payload = {
@@ -843,28 +843,54 @@ export default function HomePage() {
       multiplier: updatedRecord.multiplier,
     };
 
-    const { error } = await supabase.from('nutrition_records').update(payload).eq('id', id);
+    const { data, error } = await supabase
+      .from('nutrition_records')
+      .update(payload)
+      .eq('id', id)
+      .select('id,multiplier')
+      .single();
+
     if (error) {
       console.error('Supabase multiplier update error', error);
       if (previousRecord) {
         setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
       }
-      setStatusMessage('倍率の保存に失敗しました。');
+      const message = formatSupabaseError(error).toLowerCase();
+      const missingMultiplierColumn = /multiplier/.test(message) && /column|does not exist|schema cache/.test(message);
+      if (missingMultiplierColumn) {
+        setStatusMessage('倍率列が見つかりません。db/supabase_create_table.sql の ALTER TABLE を実行してください。');
+      } else {
+        setStatusMessage(`倍率の保存に失敗しました: ${formatSupabaseError(error)}`);
+      }
+      return false;
     }
+
+    if (data && Number(data.multiplier) > 0) {
+      setRecords((prev) => prev.map((record) => {
+        if (record.id !== id) return record;
+        return { ...record, multiplier: Number(data.multiplier) };
+      }));
+    }
+
+    return true;
   };
 
   const handleRecordMultiplierInput = (id: string, rawValue: string) => {
     setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
   };
 
-  const commitRecordMultiplier = async (id: string) => {
-    const rawValue = recordMultiplierDrafts[id];
+  const commitRecordMultiplier = async (id: string, rawValueFromBlur?: string) => {
+    const rawValue = rawValueFromBlur ?? recordMultiplierDrafts[id];
     if (rawValue === undefined) {
       return;
     }
 
     const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
-    await updateRecordMultiplier(id, nextMultiplier);
+    const saved = await updateRecordMultiplier(id, nextMultiplier);
+
+    if (!saved) {
+      return;
+    }
 
     setRecordMultiplierDrafts((prev) => {
       const next = { ...prev };
@@ -1255,8 +1281,8 @@ export default function HomePage() {
                       inputMode="decimal"
                       value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
                       onChange={(e) => handleRecordMultiplierInput(record.id, e.target.value)}
-                      onBlur={() => {
-                        void commitRecordMultiplier(record.id);
+                      onBlur={(e) => {
+                        void commitRecordMultiplier(record.id, e.currentTarget.value);
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {

@@ -22,4 +22,12 @@ create table if not exists public.nutrition_records (
 alter table public.nutrition_records
   add column if not exists multiplier numeric default 1;
 
+-- Migration for existing projects where multiplier column may be missing or null.
+alter table public.nutrition_records
+  alter column multiplier set default 1;
+
+update public.nutrition_records
+set multiplier = 1
+where multiplier is null;
+
 create index if not exists idx_nutrition_records_created_at on public.nutrition_records(created_at desc);
