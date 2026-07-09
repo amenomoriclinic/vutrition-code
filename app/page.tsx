@@ -968,10 +968,13 @@ export default function HomePage() {
     }
   };
 
-  const handleRecordMultiplierInput = async (id: string, rawValue: string) => {
+  const handleRecordMultiplierInput = (id: string, rawValue: string) => {
     setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
+  };
 
-    if (!rawValue || !rawValue.trim()) {
+  const saveRecordMultiplier = async (id: string) => {
+    const rawValue = recordMultiplierDrafts[id];
+    if (rawValue === undefined || !rawValue.trim()) {
       return;
     }
 
@@ -980,7 +983,7 @@ export default function HomePage() {
       return;
     }
 
-    console.log('[multiplier:input-change] trigger save', { id, rawValue, nextMultiplier });
+    console.log('[multiplier:save-click] trigger save', { id, rawValue, nextMultiplier });
 
     const saved = await updateRecordMultiplier(id, nextMultiplier);
 
@@ -994,8 +997,6 @@ export default function HomePage() {
       return next;
     });
   };
-
-  console.log('multiplier input rendered');
 
   return (
     <main>
@@ -1378,19 +1379,26 @@ export default function HomePage() {
                       step="0.1"
                       inputMode="decimal"
                       value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
-                      onInput={(e) => {
-                        void handleRecordMultiplierInput(record.id, (e.currentTarget as HTMLInputElement).value);
-                      }}
                       onChange={(e) => {
-                        void handleRecordMultiplierInput(record.id, e.target.value);
+                        handleRecordMultiplierInput(record.id, e.target.value);
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
-                          (e.currentTarget as HTMLInputElement).blur();
+                          e.preventDefault();
+                          void saveRecordMultiplier(record.id);
                         }
                       }}
                     />
                   </label>
+                  <button
+                    type="button"
+                    className="button-secondary record-save"
+                    onClick={() => {
+                      void saveRecordMultiplier(record.id);
+                    }}
+                  >
+                    保存
+                  </button>
                   <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
                     ×
                   </button>

@@ -292,7 +292,7 @@ small {
 
 .record-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 4px;
 }
@@ -354,6 +354,15 @@ small {
   border-radius: 6px;
   font-size: 0.82rem;
   line-height: 1;
+}
+
+.record-save {
+  padding: 2px 8px;
+  min-width: 0;
+  border-radius: 7px;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .button-danger.record-delete {
@@ -452,7 +461,7 @@ small {
   }
 
   .record-head {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     gap: 3px;
   }
 
@@ -491,6 +500,11 @@ small {
     width: auto;
     padding: 1px 5px;
     font-size: 0.76rem;
+  }
+
+  .record-save {
+    padding: 1px 6px;
+    font-size: 0.64rem;
   }
 
   .record-nutrients {
