@@ -37,13 +37,31 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
+  const reqUrl = new URL(req.url);
+  const isHttpRequest = reqUrl.protocol === 'http:' || reqUrl.protocol === 'https:';
+  if (!isHttpRequest) {
+    return;
+  }
+
+  const tryCachePut = async (request, response) => {
+    try {
+      const resUrl = new URL(response.url || request.url);
+      const isHttpResponse = resUrl.protocol === 'http:' || resUrl.protocol === 'https:';
+      if (!isHttpResponse) return;
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response);
+    } catch (e) {
+      // Ignore cache write failures for unsupported schemes (e.g. chrome-extension:)
+    }
+  };
+
   // Always prefer network for document requests so updated app shell is loaded quickly.
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
         .then((res) => {
           const respClone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, respClone));
+          void tryCachePut(req, respClone);
           return res;
         })
         .catch(() => caches.match(req).then((cached) => cached || caches.match('/')))
@@ -58,7 +76,7 @@ self.addEventListener('fetch', (event) => {
         .then((res) => {
           if (!res || res.status !== 200 || res.type !== 'basic') return res;
           const respClone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, respClone));
+          void tryCachePut(req, respClone);
           return res;
         })
         .catch(() => caches.match('/'));

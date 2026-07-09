@@ -875,8 +875,10 @@ export default function HomePage() {
       return false;
     }
 
+    // Always keep a local fallback first so multiplier survives refresh even if remote write fails.
+    setMultiplierOverride(id, nextMultiplier);
+
     if (!isSupabaseConfigured) {
-      setMultiplierOverride(id, nextMultiplier);
       setStatusMessage('Supabase が未設定のため、倍率はこの端末にのみ保存しました。');
       return true;
     }
@@ -890,20 +892,37 @@ export default function HomePage() {
       multiplier: updatedRecord.multiplier,
     };
 
-    console.info('[multiplier:update] request', { id, payload });
+    console.info('[multiplier:update] request', {
+      id,
+      idType: typeof id,
+      idLength: String(id).length,
+      payload,
+    });
 
     try {
-      const { data, error, count } = await supabase
+      let { data, error, count } = await supabase
         .from('nutrition_records')
         .update(payload, { count: 'exact' })
         .eq('id', id)
         .select('id,multiplier');
 
+      // Fallback update path: if wide payload fails, try minimal multiplier-only update.
+      if (error || !Array.isArray(data) || data.length === 0) {
+        console.warn('[multiplier:update] retry with minimal payload', { id, error, count });
+        const retry = await supabase
+          .from('nutrition_records')
+          .update({ multiplier: payload.multiplier }, { count: 'exact' })
+          .eq('id', id)
+          .select('id,multiplier');
+        data = retry.data;
+        error = retry.error;
+        count = retry.count;
+      }
+
       console.info('[multiplier:update] response', { id, count, dataLength: data?.length ?? 0, error });
 
       if (error) {
         console.error('[multiplier:update] query error', { id, payload, error });
-        setMultiplierOverride(id, nextMultiplier);
         const message = formatSupabaseError(error).toLowerCase();
         const missingMultiplierColumn = /multiplier/.test(message) && /column|does not exist|schema cache/.test(message);
         if (missingMultiplierColumn) {
@@ -934,7 +953,6 @@ export default function HomePage() {
           verifyError: verify.error,
         });
 
-        setMultiplierOverride(id, nextMultiplier);
         setStatusMessage('倍率の保存に失敗しました。RLSポリシーまたは更新権限を確認してください（端末には保存済み）。');
         return true;
       }
@@ -945,7 +963,6 @@ export default function HomePage() {
       return true;
     } catch (e) {
       console.error('[multiplier:update] unexpected error', { id, payload, error: e });
-      setMultiplierOverride(id, nextMultiplier);
       setStatusMessage('倍率の保存中に予期しないエラーが発生しました（端末には保存済み）。');
       return true;
     }
