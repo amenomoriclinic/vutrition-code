@@ -880,7 +880,7 @@ export default function HomePage() {
 
     if (!isSupabaseConfigured) {
       setStatusMessage('Supabase が未設定のため、倍率はこの端末にのみ保存しました。');
-      return true;
+      return false;
     }
 
     const payload = {
@@ -930,7 +930,7 @@ export default function HomePage() {
         } else {
           setStatusMessage(`倍率の保存に失敗しました（端末には保存済み）: ${formatSupabaseError(error)}`);
         }
-        return true;
+        return false;
       }
 
       const updatedRow = Array.isArray(data) ? data[0] : undefined;
@@ -954,7 +954,7 @@ export default function HomePage() {
         });
 
         setStatusMessage('倍率の保存に失敗しました。RLSポリシーまたは更新権限を確認してください（端末には保存済み）。');
-        return true;
+        return false;
       }
 
       console.info('[multiplier:update] success', { id, payload, count, updatedMultiplier });
@@ -964,21 +964,24 @@ export default function HomePage() {
     } catch (e) {
       console.error('[multiplier:update] unexpected error', { id, payload, error: e });
       setStatusMessage('倍率の保存中に予期しないエラーが発生しました（端末には保存済み）。');
-      return true;
+      return false;
     }
   };
 
-  const handleRecordMultiplierInput = (id: string, rawValue: string) => {
+  const handleRecordMultiplierInput = async (id: string, rawValue: string) => {
     setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
-  };
 
-  const commitRecordMultiplier = async (id: string, rawValueFromBlur?: string) => {
-    const rawValue = rawValueFromBlur ?? recordMultiplierDrafts[id];
-    if (rawValue === undefined) {
+    if (!rawValue || !rawValue.trim()) {
       return;
     }
 
     const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
+    if (!Number.isFinite(nextMultiplier)) {
+      return;
+    }
+
+    console.info('[multiplier:input-change] trigger save', { id, rawValue, nextMultiplier });
+
     const saved = await updateRecordMultiplier(id, nextMultiplier);
 
     if (!saved) {
@@ -1373,9 +1376,8 @@ export default function HomePage() {
                       step="0.1"
                       inputMode="decimal"
                       value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
-                      onChange={(e) => handleRecordMultiplierInput(record.id, e.target.value)}
-                      onBlur={(e) => {
-                        void commitRecordMultiplier(record.id, e.currentTarget.value);
+                      onChange={(e) => {
+                        void handleRecordMultiplierInput(record.id, e.target.value);
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
