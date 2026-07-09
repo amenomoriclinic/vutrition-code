@@ -172,6 +172,16 @@ const defaultFavorites: FavoriteFood[] = [
     salt: 0.2,
   },
   {
+    id: 'honey-tbsp1',
+    name: 'はちみつ 大さじ1',
+    amountText: '大さじ1',
+    calories: 69,
+    protein: 0.1,
+    fat: 0,
+    carbs: 17.2,
+    salt: 0,
+  },
+  {
     id: 'ensure-liquid-h-250',
     name: 'エンシュアリキッドH 250ml',
     amountText: '250ml',
