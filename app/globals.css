@@ -357,12 +357,33 @@ small {
 }
 
 .record-save {
-  padding: 2px 8px;
-  min-width: 0;
-  border-radius: 7px;
-  font-size: 0.68rem;
-  line-height: 1.1;
+  padding: 6px 10px;
+  min-width: 50px;
+  border-radius: 9px;
+  font-size: 0.72rem;
+  line-height: 1;
   white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.record-save:disabled {
+  opacity: 0.9;
+  cursor: default;
+}
+
+.record-save.record-save-saving {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.record-save.record-save-success {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.record-save.record-save-error {
+  background: #dc2626;
+  color: #ffffff;
 }
 
 .button-danger.record-delete {
@@ -503,8 +524,9 @@ small {
   }
 
   .record-save {
-    padding: 1px 6px;
-    font-size: 0.64rem;
+    padding: 7px 10px;
+    min-width: 54px;
+    font-size: 0.68rem;
   }
 
   .record-nutrients {

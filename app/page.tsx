@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
 import { getDRI } from '../lib/dri';
@@ -218,6 +218,21 @@ export default function HomePage() {
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
   const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
+  const [recordSaveStates, setRecordSaveStates] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({});
+  const recordSaveResetTimers = useRef<Record<string, number>>({});
+
+  const scheduleRecordSaveStateReset = (id: string, nextState: 'success' | 'error') => {
+    const existingTimer = recordSaveResetTimers.current[id];
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+
+    setRecordSaveStates((prev) => ({ ...prev, [id]: nextState }));
+    recordSaveResetTimers.current[id] = window.setTimeout(() => {
+      setRecordSaveStates((prev) => ({ ...prev, [id]: 'idle' }));
+      delete recordSaveResetTimers.current[id];
+    }, 1200);
+  };
 
   const getMultiplierOverrides = () => {
     try {
@@ -422,6 +437,14 @@ export default function HomePage() {
   useEffect(() => {
     localStorage.setItem(STORAGE_RECORDS, JSON.stringify(records));
   }, [records]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(recordSaveResetTimers.current).forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+    };
+  }, []);
 
   const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 
@@ -1033,13 +1056,17 @@ export default function HomePage() {
         console.warn('[multiplier:save-click] log failed', logError);
       }
 
+      setRecordSaveStates((prev) => ({ ...prev, [id]: 'saving' }));
       console.log('[multiplier:save-click] before updateRecordMultiplier', { id, nextMultiplier });
       const saved = await updateRecordMultiplier(id, nextMultiplier);
       console.log('[multiplier:save-click] after updateRecordMultiplier', { id, nextMultiplier, saved });
 
       if (!saved) {
+        scheduleRecordSaveStateReset(id, 'error');
         return;
       }
+
+      scheduleRecordSaveStateReset(id, 'success');
 
       setRecordMultiplierDrafts((prev) => {
         const next = { ...prev };
@@ -1048,6 +1075,7 @@ export default function HomePage() {
       });
     } catch (e) {
       console.error('[multiplier:save-click] unexpected error', { id, error: e });
+      scheduleRecordSaveStateReset(id, 'error');
     }
   };
 
@@ -1445,12 +1473,17 @@ export default function HomePage() {
                   </label>
                   <button
                     type="button"
-                    className="button-secondary record-save"
+                    className={`button-secondary record-save record-save-${recordSaveStates[record.id] || 'idle'}`}
+                    disabled={(recordSaveStates[record.id] || 'idle') === 'saving'}
                     onClick={() => {
                       void saveRecordMultiplier(record.id);
                     }}
                   >
-                    保存
+                    {(recordSaveStates[record.id] || 'idle') === 'saving'
+                      ? '保存中'
+                      : (recordSaveStates[record.id] || 'idle') === 'success'
+                        ? '✓'
+                        : '保存'}
                   </button>
                   <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
                     ×
