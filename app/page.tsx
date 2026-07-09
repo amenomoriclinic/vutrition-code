@@ -156,6 +156,33 @@ const clampPhosphorusAbsorptionRate = (value: number) => {
   return Math.max(0, Math.min(1, n));
 };
 
+const pickPhosphorusValue = (source: any) => {
+  const candidates = [
+    source?.phosphorus,
+    source?.phosphorous,
+    source?.phosphorusMg,
+    source?.phosphorus_mg,
+  ];
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+};
+
+const pickPhosphorusAbsorptionRate = (source: any, fallback = 0.5) => {
+  const candidates = [
+    source?.phosphorusAbsorptionRate,
+    source?.phosphorus_absorption_rate,
+    source?.absorptionRate,
+  ];
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return clampPhosphorusAbsorptionRate(n);
+  }
+  return clampPhosphorusAbsorptionRate(fallback);
+};
+
 const STORAGE_RECORDS = 'nutrition_records';
 const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
@@ -235,6 +262,8 @@ const defaultFavorites: FavoriteFood[] = [
     phosphorusAbsorptionRate: 0.85,
   },
 ];
+
+const defaultFavoriteById = new Map(defaultFavorites.map((item) => [item.id, item]));
 
 const activityLabels: Record<ActivityLevel, string> = {
   low: '低い(デスク中心)',
@@ -340,18 +369,22 @@ export default function HomePage() {
         if (Array.isArray(parsed)) {
           const normalized = parsed
             .filter(isValidFavorite)
-            .map((f) => ({
-              id: String(f.id),
-              name: String(f.name),
-              amountText: String(f.amountText || '1単位'),
-              calories: Number(f.calories) || 0,
-              protein: Number(f.protein) || 0,
-              fat: Number(f.fat) || 0,
-              carbs: Number(f.carbs) || 0,
-              salt: Number(f.salt) || 0,
-              phosphorus: Number(f.phosphorus) || 0,
-              phosphorusAbsorptionRate: Math.max(0, Math.min(1, Number(f.phosphorusAbsorptionRate) || 0.5)),
-            }))
+            .map((f) => {
+              const id = String(f.id);
+              const preset = defaultFavoriteById.get(id);
+              return {
+                id,
+                name: String(f.name),
+                amountText: String(f.amountText || '1単位'),
+                calories: Number(f.calories) || 0,
+                protein: Number(f.protein) || 0,
+                fat: Number(f.fat) || 0,
+                carbs: Number(f.carbs) || 0,
+                salt: Number(f.salt) || 0,
+                phosphorus: pickPhosphorusValue(f) || preset?.phosphorus || 0,
+                phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(f, preset?.phosphorusAbsorptionRate || 0.5),
+              };
+            })
             .filter((f) => !isLegacyInoras120(f));
           setFavorites(normalized);
         } else {
@@ -848,8 +881,8 @@ export default function HomePage() {
             fat: Number(result.estimate.fat) || 0,
             carbs: Number(result.estimate.carbs) || 0,
             salt: Number(result.estimate.salt) || 0,
-            phosphorus: Number(result.estimate.phosphorus) || 0,
-            phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(result.estimate.phosphorusAbsorptionRate) || 0.5),
+            phosphorus: pickPhosphorusValue(result.estimate),
+            phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(result.estimate, 0.85),
             description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示。実際の入力量 ${intakeAmount}${intakeUnit} を倍率として適用)`,
             imageUrl: item.previewUrl,
           };
@@ -862,8 +895,8 @@ export default function HomePage() {
             fat: Number(result.estimate.fat) || 0,
             carbs: Number(result.estimate.carbs) || 0,
             salt: Number(result.estimate.salt) || 0,
-            phosphorus: Number(result.estimate.phosphorus) || 0,
-            phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(result.estimate.phosphorusAbsorptionRate) || 0.5),
+            phosphorus: pickPhosphorusValue(result.estimate),
+            phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(result.estimate, 0.5),
             description: item.description,
             imageUrl: item.previewUrl,
           };

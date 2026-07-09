@@ -92,8 +92,10 @@ export async function POST(request: Request) {
     const parsed = JSON.parse(text.slice(start, end + 1));
     const parsedName = String(parsed.name || foodName || '食品');
     const fallbackAbsorptionRate = inferAbsorptionRate(parsedName, mode);
-    parsed.phosphorus = Number(parsed.phosphorus) || 0;
-    parsed.phosphorusAbsorptionRate = Math.max(0, Math.min(1, Number(parsed.phosphorusAbsorptionRate) || fallbackAbsorptionRate));
+    const parsedPhosphorus = Number(parsed.phosphorus ?? parsed.phosphorous ?? parsed.phosphorusMg ?? parsed.phosphorus_mg);
+    parsed.phosphorus = Number.isFinite(parsedPhosphorus) ? parsedPhosphorus : 0;
+    const parsedRate = Number(parsed.phosphorusAbsorptionRate ?? parsed.phosphorus_absorption_rate ?? parsed.absorptionRate);
+    parsed.phosphorusAbsorptionRate = Math.max(0, Math.min(1, Number.isFinite(parsedRate) ? parsedRate : fallbackAbsorptionRate));
     if (mode === 'label') {
       parsed.mode = 'label';
       parsed.consumedGrams = consumedGrams;
