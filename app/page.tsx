@@ -239,16 +239,24 @@ export default function HomePage() {
   };
 
   const setMultiplierOverride = (id: string, multiplier: number) => {
-    const current = getMultiplierOverrides();
-    current[id] = Math.max(0.1, Number(multiplier) || 1);
-    localStorage.setItem(STORAGE_MULTIPLIER_OVERRIDES, JSON.stringify(current));
+    try {
+      const current = getMultiplierOverrides();
+      current[id] = Math.max(0.1, Number(multiplier) || 1);
+      localStorage.setItem(STORAGE_MULTIPLIER_OVERRIDES, JSON.stringify(current));
+    } catch (e) {
+      console.warn('[multiplier:local-fallback] set failed', { id, multiplier, error: e });
+    }
   };
 
   const clearMultiplierOverride = (id: string) => {
-    const current = getMultiplierOverrides();
-    if (!(id in current)) return;
-    delete current[id];
-    localStorage.setItem(STORAGE_MULTIPLIER_OVERRIDES, JSON.stringify(current));
+    try {
+      const current = getMultiplierOverrides();
+      if (!(id in current)) return;
+      delete current[id];
+      localStorage.setItem(STORAGE_MULTIPLIER_OVERRIDES, JSON.stringify(current));
+    } catch (e) {
+      console.warn('[multiplier:local-fallback] clear failed', { id, error: e });
+    }
   };
 
   useEffect(() => {
@@ -860,50 +868,50 @@ export default function HomePage() {
   };
 
   const updateRecordMultiplier = async (id: string, value: number): Promise<boolean> => {
-    const nextMultiplier = Math.max(0.1, Number(value) || 1);
-    let previousRecord: NutritionRecord | undefined;
-    let updatedRecord: NutritionRecord | undefined;
-
-    setRecords((prev) => prev.map((record) => {
-      if (record.id !== id) return record;
-      previousRecord = record;
-      updatedRecord = applyMultiplierToRecord(record, nextMultiplier);
-      return updatedRecord;
-    }));
-
-    if (!updatedRecord) {
-      return false;
-    }
-
-    // Always keep a local fallback first so multiplier survives refresh even if remote write fails.
-    setMultiplierOverride(id, nextMultiplier);
-
-    if (!isSupabaseConfigured) {
-      setStatusMessage('Supabase が未設定のため、倍率はこの端末にのみ保存しました。');
-      return false;
-    }
-
-    const payload = {
-      calories: updatedRecord.calories,
-      protein: updatedRecord.protein,
-      fat: updatedRecord.fat,
-      carbs: updatedRecord.carbs,
-      salt: updatedRecord.salt,
-      multiplier: updatedRecord.multiplier,
-    };
-
     try {
-      console.log('[multiplier:update] request', {
-        id,
-        idType: typeof id,
-        idLength: String(id).length,
-        payload,
-      });
-    } catch (logError) {
-      console.warn('[multiplier:update] request log failed', logError);
-    }
+      console.log('[multiplier:update] entered', { id, value });
 
-    try {
+      const nextMultiplier = Math.max(0.1, Number(value) || 1);
+      let updatedRecord: NutritionRecord | undefined;
+
+      setRecords((prev) => prev.map((record) => {
+        if (record.id !== id) return record;
+        updatedRecord = applyMultiplierToRecord(record, nextMultiplier);
+        return updatedRecord;
+      }));
+
+      if (!updatedRecord) {
+        console.warn('[multiplier:update] record not found', { id, value });
+        return false;
+      }
+
+      setMultiplierOverride(id, nextMultiplier);
+
+      if (!isSupabaseConfigured) {
+        setStatusMessage('Supabase が未設定のため、倍率はこの端末にのみ保存しました。');
+        return false;
+      }
+
+      const payload = {
+        calories: updatedRecord.calories,
+        protein: updatedRecord.protein,
+        fat: updatedRecord.fat,
+        carbs: updatedRecord.carbs,
+        salt: updatedRecord.salt,
+        multiplier: updatedRecord.multiplier,
+      };
+
+      try {
+        console.log('[multiplier:update] request', {
+          id,
+          idType: typeof id,
+          idLength: String(id).length,
+          payload,
+        });
+      } catch (logError) {
+        console.warn('[multiplier:update] request log failed', logError);
+      }
+
       try {
         console.log('[multiplier:update] before supabase update', { id, payload });
       } catch (logError) {
@@ -927,7 +935,6 @@ export default function HomePage() {
         console.warn('[multiplier:update] after-query log failed', logError);
       }
 
-      // Fallback update path: if wide payload fails, try minimal multiplier-only update.
       if (error || !Array.isArray(data) || data.length === 0) {
         console.warn('[multiplier:update] retry with minimal payload', { id, error, count });
         const retry = await supabase
@@ -984,10 +991,9 @@ export default function HomePage() {
 
       console.log('[multiplier:update] success', { id, payload, count, updatedMultiplier });
       clearMultiplierOverride(id);
-
       return true;
     } catch (e) {
-      console.error('[multiplier:update] unexpected error', { id, payload, error: e });
+      console.error('[multiplier:update] unexpected error', { id, value, error: e });
       setStatusMessage('倍率の保存中に予期しないエラーが発生しました（端末には保存済み）。');
       return false;
     }
@@ -999,8 +1005,10 @@ export default function HomePage() {
 
   const saveRecordMultiplier = async (id: string) => {
     try {
+      console.log('[multiplier:save-click] entered', { id });
       const rawValue = recordMultiplierDrafts[id];
       if (rawValue === undefined || !rawValue.trim()) {
+        console.warn('[multiplier:save-click] no draft value', { id, rawValue });
         return;
       }
 
@@ -1015,7 +1023,9 @@ export default function HomePage() {
         console.warn('[multiplier:save-click] log failed', logError);
       }
 
+      console.log('[multiplier:save-click] before updateRecordMultiplier', { id, nextMultiplier });
       const saved = await updateRecordMultiplier(id, nextMultiplier);
+      console.log('[multiplier:save-click] after updateRecordMultiplier', { id, nextMultiplier, saved });
 
       if (!saved) {
         return;
