@@ -267,10 +267,24 @@ small {
   border-radius: 14px;
 }
 
+.weekly-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .weekly-summary-title {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 1rem;
   color: #1e3a8a;
+}
+
+.weekly-summary-close {
+  min-width: auto;
+  padding: 7px 12px;
+  border-radius: 10px;
 }
 
 .weekly-summary-grid {
@@ -413,9 +427,32 @@ small {
 
 .record-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 4px;
+}
+
+.record-save-all {
+  min-height: 42px;
+  min-width: 180px;
+  border-radius: 12px;
+  font-weight: 700;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.record-save-all.record-save-all-saving {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.record-save-all.record-save-all-success {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.record-save-all.record-save-all-error {
+  background: #dc2626;
+  color: #ffffff;
 }
 
 .record-main {
@@ -603,7 +640,7 @@ small {
   }
 
   .record-head {
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 3px;
   }
 
@@ -648,6 +685,13 @@ small {
     padding: 7px 10px;
     min-width: 54px;
     font-size: 0.68rem;
+  }
+
+  .record-save-all {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    font-size: 0.9rem;
   }
 
   .record-nutrients {

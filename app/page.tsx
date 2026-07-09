@@ -300,23 +300,22 @@ export default function HomePage() {
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
   const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
-  const [recordSaveStates, setRecordSaveStates] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({});
+  const [bulkRecordSaveState, setBulkRecordSaveState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [bulkRecordSaveCount, setBulkRecordSaveCount] = useState(0);
   const [weeklySummaryLoading, setWeeklySummaryLoading] = useState(false);
   const [weeklySummaryError, setWeeklySummaryError] = useState('');
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummaryResult | null>(null);
-  const recordSaveResetTimers = useRef<Record<string, number>>({});
+  const bulkRecordSaveResetTimer = useRef<number | null>(null);
 
-  const scheduleRecordSaveStateReset = (id: string, nextState: 'success' | 'error') => {
-    const existingTimer = recordSaveResetTimers.current[id];
-    if (existingTimer) {
-      window.clearTimeout(existingTimer);
+  const resetBulkRecordSaveStateAfterDelay = () => {
+    if (bulkRecordSaveResetTimer.current) {
+      window.clearTimeout(bulkRecordSaveResetTimer.current);
     }
-
-    setRecordSaveStates((prev) => ({ ...prev, [id]: nextState }));
-    recordSaveResetTimers.current[id] = window.setTimeout(() => {
-      setRecordSaveStates((prev) => ({ ...prev, [id]: 'idle' }));
-      delete recordSaveResetTimers.current[id];
-    }, 1200);
+    bulkRecordSaveResetTimer.current = window.setTimeout(() => {
+      setBulkRecordSaveState('idle');
+      setBulkRecordSaveCount(0);
+      bulkRecordSaveResetTimer.current = null;
+    }, 2000);
   };
 
   const getMultiplierOverrides = () => {
@@ -547,9 +546,9 @@ export default function HomePage() {
 
   useEffect(() => {
     return () => {
-      Object.values(recordSaveResetTimers.current).forEach((timerId) => {
-        window.clearTimeout(timerId);
-      });
+      if (bulkRecordSaveResetTimer.current) {
+        window.clearTimeout(bulkRecordSaveResetTimer.current);
+      }
     };
   }, []);
 
@@ -1274,47 +1273,67 @@ export default function HomePage() {
     setRecordMultiplierDrafts((prev) => ({ ...prev, [id]: rawValue }));
   };
 
-  const saveRecordMultiplier = async (id: string) => {
-    try {
-      console.log('[multiplier:save-click] entered', { id });
-      const rawValue = recordMultiplierDrafts[id];
-      if (rawValue === undefined || !rawValue.trim()) {
-        console.warn('[multiplier:save-click] no draft value', { id, rawValue });
-        return;
-      }
-
-      const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
-      if (!Number.isFinite(nextMultiplier)) {
-        return;
-      }
-
-      try {
-        console.log('[multiplier:save-click] trigger save', { id, rawValue, nextMultiplier });
-      } catch (logError) {
-        console.warn('[multiplier:save-click] log failed', logError);
-      }
-
-      setRecordSaveStates((prev) => ({ ...prev, [id]: 'saving' }));
-      console.log('[multiplier:save-click] before updateRecordMultiplier', { id, nextMultiplier });
-      const saved = await updateRecordMultiplier(id, nextMultiplier);
-      console.log('[multiplier:save-click] after updateRecordMultiplier', { id, nextMultiplier, saved });
-
-      if (!saved) {
-        scheduleRecordSaveStateReset(id, 'error');
-        return;
-      }
-
-      scheduleRecordSaveStateReset(id, 'success');
-
-      setRecordMultiplierDrafts((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-    } catch (e) {
-      console.error('[multiplier:save-click] unexpected error', { id, error: e });
-      scheduleRecordSaveStateReset(id, 'error');
+  const saveAllRecordMultipliers = async () => {
+    if (bulkRecordSaveState === 'saving') {
+      return;
     }
+
+    const targets = Object.entries(recordMultiplierDrafts)
+      .map(([id, rawValue]) => {
+        const currentRecord = records.find((record) => record.id === id);
+        if (!currentRecord) return null;
+        if (!rawValue || !rawValue.trim()) return null;
+        const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
+        if (!Number.isFinite(nextMultiplier)) return null;
+        const currentMultiplier = Math.max(0.1, Number(currentRecord.multiplier) || 1);
+        if (Math.abs(nextMultiplier - currentMultiplier) < 0.0001) return null;
+        return { id, nextMultiplier };
+      })
+      .filter((item): item is { id: string; nextMultiplier: number } => item !== null);
+
+    if (targets.length === 0) {
+      setStatusMessage('変更された倍率はありません。');
+      return;
+    }
+
+    setBulkRecordSaveState('saving');
+    setBulkRecordSaveCount(0);
+
+    let savedCount = 0;
+    const savedIds = new Set<string>();
+
+    for (const target of targets) {
+      const saved = await updateRecordMultiplier(target.id, target.nextMultiplier);
+      if (saved) {
+        savedCount += 1;
+        savedIds.add(target.id);
+      }
+    }
+
+    setRecordMultiplierDrafts((prev) => {
+      const next = { ...prev };
+      savedIds.forEach((id) => {
+        delete next[id];
+      });
+      return next;
+    });
+
+    if (savedCount === targets.length) {
+      setBulkRecordSaveState('success');
+      setBulkRecordSaveCount(savedCount);
+      setStatusMessage(`${savedCount}件を保存しました。`);
+      resetBulkRecordSaveStateAfterDelay();
+      return;
+    }
+
+    setBulkRecordSaveState('error');
+    setBulkRecordSaveCount(savedCount);
+    if (savedCount > 0) {
+      setStatusMessage(`${savedCount}件を保存しました。一部の保存に失敗しました。`);
+    } else {
+      setStatusMessage('保存に失敗しました。');
+    }
+    resetBulkRecordSaveStateAfterDelay();
   };
 
   return (
@@ -1734,7 +1753,19 @@ export default function HomePage() {
         </div>
         {weeklySummary ? (
           <div className="weekly-summary-card">
-            <h3 className="weekly-summary-title">先週のサマリー（{weeklySummary.periodStart} - {weeklySummary.periodEnd}）</h3>
+            <div className="weekly-summary-header">
+              <h3 className="weekly-summary-title">先週のサマリー（{weeklySummary.periodStart} - {weeklySummary.periodEnd}）</h3>
+              <button
+                type="button"
+                className="button-secondary weekly-summary-close"
+                onClick={() => {
+                  setWeeklySummary(null);
+                  setWeeklySummaryError('');
+                }}
+              >
+                閉じる
+              </button>
+            </div>
             <div className="weekly-summary-grid">
               <div className="summary-item">
                 <span>平均カロリー</span>
@@ -1799,6 +1830,24 @@ export default function HomePage() {
 
       <div className="page-card">
         <h2 className="section-title">記録一覧</h2>
+        <div className="record-actions">
+          <button
+            type="button"
+            className={`button-secondary record-save-all record-save-all-${bulkRecordSaveState}`}
+            disabled={bulkRecordSaveState === 'saving'}
+            onClick={() => {
+              void saveAllRecordMultipliers();
+            }}
+          >
+            {bulkRecordSaveState === 'saving'
+              ? '保存中...'
+              : bulkRecordSaveState === 'success'
+                ? `✓ ${bulkRecordSaveCount}件保存しました`
+                : bulkRecordSaveState === 'error'
+                  ? '保存に失敗しました'
+                  : '全て保存'}
+          </button>
+        </div>
         {filteredRecords.length === 0 ? (
           <p>この日の記録はまだありません。</p>
         ) : (
@@ -1821,28 +1870,8 @@ export default function HomePage() {
                       onChange={(e) => {
                         handleRecordMultiplierInput(record.id, e.target.value);
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          void saveRecordMultiplier(record.id);
-                        }
-                      }}
                     />
                   </label>
-                  <button
-                    type="button"
-                    className={`button-secondary record-save record-save-${recordSaveStates[record.id] || 'idle'}`}
-                    disabled={(recordSaveStates[record.id] || 'idle') === 'saving'}
-                    onClick={() => {
-                      void saveRecordMultiplier(record.id);
-                    }}
-                  >
-                    {(recordSaveStates[record.id] || 'idle') === 'saving'
-                      ? '保存中'
-                      : (recordSaveStates[record.id] || 'idle') === 'success'
-                        ? '✓'
-                        : '保存'}
-                  </button>
                   <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
                     ×
                   </button>
