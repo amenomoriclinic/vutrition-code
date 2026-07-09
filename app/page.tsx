@@ -872,18 +872,24 @@ export default function HomePage() {
       console.log('[multiplier:update] entered', { id, value });
 
       const nextMultiplier = Math.max(0.1, Number(value) || 1);
-      let updatedRecord: NutritionRecord | undefined;
+      const currentRecord = records.find((record) => record.id === id);
 
-      setRecords((prev) => prev.map((record) => {
-        if (record.id !== id) return record;
-        updatedRecord = applyMultiplierToRecord(record, nextMultiplier);
-        return updatedRecord;
-      }));
+      console.log('[multiplier:update] lookup', {
+        id,
+        recordCount: records.length,
+        found: Boolean(currentRecord),
+        currentRecord,
+        isSupabaseConfigured,
+      });
 
-      if (!updatedRecord) {
-        console.warn('[multiplier:update] record not found', { id, value });
+      if (!currentRecord) {
+        console.warn('[multiplier:update] record not found', { id, value, records });
         return false;
       }
+
+      const updatedRecord = applyMultiplierToRecord(currentRecord, nextMultiplier);
+
+      setRecords((prev) => prev.map((record) => (record.id === id ? updatedRecord : record)));
 
       setMultiplierOverride(id, nextMultiplier);
 
@@ -918,15 +924,18 @@ export default function HomePage() {
         console.warn('[multiplier:update] before-query log failed', logError);
       }
 
-      let { data, error, count } = await supabase
+      let updateResult = await supabase
         .from('nutrition_records')
         .update(payload, { count: 'exact' })
         .eq('id', id)
         .select('id,multiplier');
 
+      let { data, error, count } = updateResult;
+
       try {
         console.log('[multiplier:update] after supabase update', {
           id,
+          updateResult,
           count,
           dataLength: data?.length ?? 0,
           error,
@@ -942,6 +951,7 @@ export default function HomePage() {
           .update({ multiplier: payload.multiplier }, { count: 'exact' })
           .eq('id', id)
           .select('id,multiplier');
+        console.log('[multiplier:update] retry result', retry);
         data = retry.data;
         error = retry.error;
         count = retry.count;
