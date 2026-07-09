@@ -892,19 +892,40 @@ export default function HomePage() {
       multiplier: updatedRecord.multiplier,
     };
 
-    console.log('[multiplier:update] request', {
-      id,
-      idType: typeof id,
-      idLength: String(id).length,
-      payload,
-    });
+    try {
+      console.log('[multiplier:update] request', {
+        id,
+        idType: typeof id,
+        idLength: String(id).length,
+        payload,
+      });
+    } catch (logError) {
+      console.warn('[multiplier:update] request log failed', logError);
+    }
 
     try {
+      try {
+        console.log('[multiplier:update] before supabase update', { id, payload });
+      } catch (logError) {
+        console.warn('[multiplier:update] before-query log failed', logError);
+      }
+
       let { data, error, count } = await supabase
         .from('nutrition_records')
         .update(payload, { count: 'exact' })
         .eq('id', id)
         .select('id,multiplier');
+
+      try {
+        console.log('[multiplier:update] after supabase update', {
+          id,
+          count,
+          dataLength: data?.length ?? 0,
+          error,
+        });
+      } catch (logError) {
+        console.warn('[multiplier:update] after-query log failed', logError);
+      }
 
       // Fallback update path: if wide payload fails, try minimal multiplier-only update.
       if (error || !Array.isArray(data) || data.length === 0) {
@@ -919,7 +940,11 @@ export default function HomePage() {
         count = retry.count;
       }
 
-      console.log('[multiplier:update] response', { id, count, dataLength: data?.length ?? 0, error });
+      try {
+        console.log('[multiplier:update] response', { id, count, dataLength: data?.length ?? 0, error });
+      } catch (logError) {
+        console.warn('[multiplier:update] response log failed', logError);
+      }
 
       if (error) {
         console.error('[multiplier:update] query error', { id, payload, error });
@@ -973,29 +998,37 @@ export default function HomePage() {
   };
 
   const saveRecordMultiplier = async (id: string) => {
-    const rawValue = recordMultiplierDrafts[id];
-    if (rawValue === undefined || !rawValue.trim()) {
-      return;
+    try {
+      const rawValue = recordMultiplierDrafts[id];
+      if (rawValue === undefined || !rawValue.trim()) {
+        return;
+      }
+
+      const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
+      if (!Number.isFinite(nextMultiplier)) {
+        return;
+      }
+
+      try {
+        console.log('[multiplier:save-click] trigger save', { id, rawValue, nextMultiplier });
+      } catch (logError) {
+        console.warn('[multiplier:save-click] log failed', logError);
+      }
+
+      const saved = await updateRecordMultiplier(id, nextMultiplier);
+
+      if (!saved) {
+        return;
+      }
+
+      setRecordMultiplierDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (e) {
+      console.error('[multiplier:save-click] unexpected error', { id, error: e });
     }
-
-    const nextMultiplier = Math.max(0.1, Number(rawValue) || 1);
-    if (!Number.isFinite(nextMultiplier)) {
-      return;
-    }
-
-    console.log('[multiplier:save-click] trigger save', { id, rawValue, nextMultiplier });
-
-    const saved = await updateRecordMultiplier(id, nextMultiplier);
-
-    if (!saved) {
-      return;
-    }
-
-    setRecordMultiplierDrafts((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
   };
 
   return (
