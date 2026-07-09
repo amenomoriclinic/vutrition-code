@@ -995,6 +995,8 @@ export default function HomePage() {
     });
   };
 
+  console.log('multiplier input rendered');
+
   return (
     <main>
       <div className="page-card">
