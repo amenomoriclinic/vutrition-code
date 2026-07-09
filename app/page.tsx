@@ -892,7 +892,7 @@ export default function HomePage() {
       multiplier: updatedRecord.multiplier,
     };
 
-    console.info('[multiplier:update] request', {
+    console.log('[multiplier:update] request', {
       id,
       idType: typeof id,
       idLength: String(id).length,
@@ -919,7 +919,7 @@ export default function HomePage() {
         count = retry.count;
       }
 
-      console.info('[multiplier:update] response', { id, count, dataLength: data?.length ?? 0, error });
+      console.log('[multiplier:update] response', { id, count, dataLength: data?.length ?? 0, error });
 
       if (error) {
         console.error('[multiplier:update] query error', { id, payload, error });
@@ -957,7 +957,7 @@ export default function HomePage() {
         return false;
       }
 
-      console.info('[multiplier:update] success', { id, payload, count, updatedMultiplier });
+      console.log('[multiplier:update] success', { id, payload, count, updatedMultiplier });
       clearMultiplierOverride(id);
 
       return true;
@@ -980,7 +980,7 @@ export default function HomePage() {
       return;
     }
 
-    console.info('[multiplier:input-change] trigger save', { id, rawValue, nextMultiplier });
+    console.log('[multiplier:input-change] trigger save', { id, rawValue, nextMultiplier });
 
     const saved = await updateRecordMultiplier(id, nextMultiplier);
 
@@ -1376,6 +1376,9 @@ export default function HomePage() {
                       step="0.1"
                       inputMode="decimal"
                       value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
+                      onInput={(e) => {
+                        void handleRecordMultiplierInput(record.id, (e.currentTarget as HTMLInputElement).value);
+                      }}
                       onChange={(e) => {
                         void handleRecordMultiplierInput(record.id, e.target.value);
                       }}
