@@ -118,13 +118,6 @@ const isLegacyInoras120 = (v: FavoriteFood) => {
   return id.includes('120') || name.includes('120ml') || name.includes('120ml') || name.includes('120ml');
 };
 
-const mergeFavorites = (saved: FavoriteFood[], defaults: FavoriteFood[]) => {
-  const map = new Map<string, FavoriteFood>();
-  for (const f of defaults) map.set(f.id, f);
-  for (const f of saved) map.set(f.id, f);
-  return Array.from(map.values());
-};
-
 const STORAGE_RECORDS = 'nutrition_records';
 const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
@@ -305,7 +298,7 @@ export default function HomePage() {
               salt: Number(f.salt) || 0,
             }))
             .filter((f) => !isLegacyInoras120(f));
-          setFavorites(mergeFavorites(normalized, defaultFavorites));
+          setFavorites(normalized);
         } else {
           setFavorites(defaultFavorites);
         }
