@@ -249,6 +249,56 @@ small {
   color: #0f766e;
 }
 
+.summary-actions {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.weekly-summary-error {
+  color: #b91c1c;
+}
+
+.weekly-summary-card {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  border-radius: 14px;
+}
+
+.weekly-summary-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: #1e3a8a;
+}
+
+.weekly-summary-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.weekly-summary-block {
+  margin-top: 10px;
+}
+
+.weekly-summary-block h4 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+
+.weekly-summary-block p {
+  margin: 0;
+  color: #334155;
+}
+
+.weekly-summary-block ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+}
+
 .chart-wrapper {
   min-height: 820px;
 }

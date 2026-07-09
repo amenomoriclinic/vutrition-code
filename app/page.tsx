@@ -86,11 +86,36 @@ type NutritionRecordInsert = {
   image_url?: string | null;
 };
 
+type WeeklySummaryAnalysis = {
+  overview: string;
+  nutrientComparison: Array<{
+    nutrient: string;
+    status: '不足' | '適正' | '過剰';
+    comment: string;
+  }>;
+  patternInsights: string[];
+  actionSuggestions: string[];
+};
+
+type WeeklySummaryResult = {
+  periodStart: string;
+  periodEnd: string;
+  averages: {
+    calories: number;
+    protein: number;
+    fat: number;
+    carbs: number;
+    salt: number;
+  };
+  exerciseCaloriesTotal: number;
+  analysis: WeeklySummaryAnalysis;
+};
+
 const normalizeSource = (source: unknown) => String(source ?? '').trim().toLowerCase();
 
 const isExerciseSource = (source: unknown) => normalizeSource(source) === 'exercise';
 
-const isExerciseRecord = (record: Pick<NutritionRecord, 'source' | 'name' | 'description'>) => {
+const isExerciseRecord = (record: { source: unknown; name: string; description: string }) => {
   if (isExerciseSource(record.source)) return true;
   const name = String(record.name || '').toLowerCase();
   const description = String(record.description || '').toLowerCase();
@@ -222,6 +247,9 @@ export default function HomePage() {
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
   const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
   const [recordSaveStates, setRecordSaveStates] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({});
+  const [weeklySummaryLoading, setWeeklySummaryLoading] = useState(false);
+  const [weeklySummaryError, setWeeklySummaryError] = useState('');
+  const [weeklySummary, setWeeklySummary] = useState<WeeklySummaryResult | null>(null);
   const recordSaveResetTimers = useRef<Record<string, number>>({});
 
   const scheduleRecordSaveStateReset = (id: string, nextState: 'success' | 'error') => {
@@ -412,6 +440,16 @@ export default function HomePage() {
 
   const recommended = useMemo(() => getDRI(profile), [profile]);
 
+  const recommendedFatGrams = useMemo(() => {
+    const fatPct = ((recommended.fat_pct_min ?? 20) + (recommended.fat_pct_max ?? 30)) / 2;
+    return Math.round(((recommended.kcal * fatPct) / 100 / 9) * 10) / 10;
+  }, [recommended]);
+
+  const recommendedCarbsGrams = useMemo(() => {
+    const carbsPct = ((recommended.carbs_pct_min ?? 50) + (recommended.carbs_pct_max ?? 65)) / 2;
+    return Math.round(((recommended.kcal * carbsPct) / 100 / 4) * 10) / 10;
+  }, [recommended]);
+
   const estimatedEnergy = useMemo(() => {
     // estimated daily energy requirement (simple PAL model)
     const base = profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight; // basal ~ kcal/day
@@ -454,6 +492,116 @@ export default function HomePage() {
   const formatSupabaseError = (error: any) => {
     if (!error) return '不明なエラー';
     return [error.message, error.details, error.hint].filter(Boolean).join(' / ');
+  };
+
+  const fetchWeeklySummary = async () => {
+    if (!isSupabaseConfigured) {
+      setWeeklySummaryError('Supabase が未設定のため、先週サマリーを取得できません。');
+      return;
+    }
+
+    setWeeklySummaryLoading(true);
+    setWeeklySummaryError('');
+
+    try {
+      const now = new Date();
+      const since = new Date(now);
+      since.setDate(since.getDate() - 6);
+      since.setHours(0, 0, 0, 0);
+
+      const periodStart = toJstDateString(since);
+      const periodEnd = toJstDateString(now);
+
+      const { data, error } = await supabase
+        .from('nutrition_records')
+        .select('calories,protein,fat,carbs,salt,source,name,description,created_at')
+        .gte('created_at', since.toISOString())
+        .lte('created_at', now.toISOString());
+
+      if (error) {
+        throw new Error(`Supabase取得エラー: ${formatSupabaseError(error)}`);
+      }
+
+      const rows = data || [];
+
+      const intakeTotals = rows.reduce(
+        (acc, row: any) => {
+          const source = normalizeSource(row.source || 'photo');
+          const pseudoRecord = {
+            source,
+            name: String(row.name || ''),
+            description: String(row.description || ''),
+          };
+          if (!isExerciseRecord(pseudoRecord)) {
+            acc.calories += Number(row.calories) || 0;
+            acc.protein += Number(row.protein) || 0;
+            acc.fat += Number(row.fat) || 0;
+            acc.carbs += Number(row.carbs) || 0;
+            acc.salt += Number(row.salt) || 0;
+          }
+          return acc;
+        },
+        { calories: 0, protein: 0, fat: 0, carbs: 0, salt: 0 }
+      );
+
+      const exerciseCaloriesTotal = rows.reduce((acc, row: any) => {
+        const source = normalizeSource(row.source || 'photo');
+        const pseudoRecord = {
+          source,
+          name: String(row.name || ''),
+          description: String(row.description || ''),
+        };
+        return isExerciseRecord(pseudoRecord) ? acc + (Number(row.calories) || 0) : acc;
+      }, 0);
+
+      const averages = {
+        calories: round1(intakeTotals.calories / 7),
+        protein: round1(intakeTotals.protein / 7),
+        fat: round1(intakeTotals.fat / 7),
+        carbs: round1(intakeTotals.carbs / 7),
+        salt: round1(intakeTotals.salt / 7),
+      };
+
+      const analysisResponse = await fetch('/api/weekly-summary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          periodStart,
+          periodEnd,
+          averages,
+          exerciseCaloriesTotal: round1(exerciseCaloriesTotal),
+          recommendedDaily: {
+            calories: recommended.kcal,
+            protein: recommended.protein,
+            fat: recommendedFatGrams,
+            carbs: recommendedCarbsGrams,
+            salt: recommended.salt,
+          },
+          profile,
+        }),
+      });
+
+      const analysisJson = await analysisResponse.json();
+      if (!analysisResponse.ok || analysisJson.error) {
+        throw new Error(analysisJson.error || 'Claude分析に失敗しました。');
+      }
+
+      setWeeklySummary({
+        periodStart,
+        periodEnd,
+        averages,
+        exerciseCaloriesTotal: round1(exerciseCaloriesTotal),
+        analysis: analysisJson.analysis,
+      });
+      setStatusMessage('先週のサマリーを更新しました。');
+    } catch (e) {
+      console.error('[weekly-summary] failed', e);
+      setWeeklySummaryError(e instanceof Error ? e.message : '先週サマリーの取得に失敗しました。');
+    } finally {
+      setWeeklySummaryLoading(false);
+    }
   };
 
   const insertNutritionRecordsWithFallback = async (rows: NutritionRecordInsert[]) => {
@@ -1419,6 +1567,12 @@ export default function HomePage() {
           日付を選択
           <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
         </label>
+        <div className="summary-actions">
+          <button className="button-secondary" type="button" onClick={() => { void fetchWeeklySummary(); }} disabled={weeklySummaryLoading}>
+            {weeklySummaryLoading ? '先週サマリーを分析中...' : '先週のサマリーを見る'}
+          </button>
+          {weeklySummaryError ? <small className="weekly-summary-error">{weeklySummaryError}</small> : null}
+        </div>
         <div className="summary-item">
           <span>総カロリー</span>
           <strong>{totals.calories.toFixed(0)} kcal</strong>
@@ -1459,8 +1613,8 @@ export default function HomePage() {
           <span>推奨（DRI 2025 暫定）</span>
           <strong>
             {recommended.kcal} kcal / P:{recommended.protein}g 
-            F: {Math.round(((recommended.kcal * (((recommended.fat_pct_min ?? 20) + (recommended.fat_pct_max ?? 30)) / 2) / 100) / 9) * 10) / 10}g 
-            C: {Math.round(((recommended.kcal * (((recommended.carbs_pct_min ?? 50) + (recommended.carbs_pct_max ?? 65)) / 2) / 100) / 4) * 10) / 10}g 
+            F: {recommendedFatGrams}g 
+            C: {recommendedCarbsGrams}g 
             Na: {recommended.salt}g
           </strong>
         </div>
@@ -1468,6 +1622,65 @@ export default function HomePage() {
           <span>必要量との差</span>
           <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
         </div>
+        {weeklySummary ? (
+          <div className="weekly-summary-card">
+            <h3 className="weekly-summary-title">先週のサマリー（{weeklySummary.periodStart} - {weeklySummary.periodEnd}）</h3>
+            <div className="weekly-summary-grid">
+              <div className="summary-item">
+                <span>平均カロリー</span>
+                <strong>{weeklySummary.averages.calories.toFixed(1)} kcal/日</strong>
+              </div>
+              <div className="summary-item">
+                <span>平均タンパク質</span>
+                <strong>{weeklySummary.averages.protein.toFixed(1)} g/日</strong>
+              </div>
+              <div className="summary-item">
+                <span>平均脂質</span>
+                <strong>{weeklySummary.averages.fat.toFixed(1)} g/日</strong>
+              </div>
+              <div className="summary-item">
+                <span>平均炭水化物</span>
+                <strong>{weeklySummary.averages.carbs.toFixed(1)} g/日</strong>
+              </div>
+              <div className="summary-item">
+                <span>平均食塩相当量</span>
+                <strong>{weeklySummary.averages.salt.toFixed(1)} g/日</strong>
+              </div>
+              <div className="summary-item">
+                <span>運動消費カロリー（7日合計）</span>
+                <strong>{weeklySummary.exerciseCaloriesTotal.toFixed(0)} kcal</strong>
+              </div>
+            </div>
+            <div className="weekly-summary-block">
+              <h4>Claude アドバイス</h4>
+              <p>{weeklySummary.analysis.overview}</p>
+            </div>
+            <div className="weekly-summary-block">
+              <h4>不足・過剰の栄養素</h4>
+              <ul>
+                {weeklySummary.analysis.nutrientComparison.map((item, idx) => (
+                  <li key={`nutrient-${idx}`}>{item.nutrient}: {item.status}（{item.comment}）</li>
+                ))}
+              </ul>
+            </div>
+            <div className="weekly-summary-block">
+              <h4>食事パターンの傾向</h4>
+              <ul>
+                {weeklySummary.analysis.patternInsights.map((item, idx) => (
+                  <li key={`pattern-${idx}`}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="weekly-summary-block">
+              <h4>改善のための具体的提案</h4>
+              <ul>
+                {weeklySummary.analysis.actionSuggestions.map((item, idx) => (
+                  <li key={`suggestion-${idx}`}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : null}
         <p><small>グラフの赤い棒は運動記録に入力した消費カロリーのみで、基礎代謝は含みません。</small></p>
         <div className="chart-wrapper">
           <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} totalConsumptionCalories={totalConsumptionCalories} date={dateFilter} />
