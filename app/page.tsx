@@ -128,6 +128,7 @@ const mergeFavorites = (saved: FavoriteFood[], defaults: FavoriteFood[]) => {
 const STORAGE_RECORDS = 'nutrition_records';
 const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
+const STORAGE_MULTIPLIER_OVERRIDES = 'nutrition_multiplier_overrides';
 
 const defaultFavorites: FavoriteFood[] = [
   {
@@ -218,6 +219,38 @@ export default function HomePage() {
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
   const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
 
+  const getMultiplierOverrides = () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_MULTIPLIER_OVERRIDES);
+      if (!raw) return {} as Record<string, number>;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return {} as Record<string, number>;
+      const next: Record<string, number> = {};
+      Object.entries(parsed).forEach(([key, value]) => {
+        const n = Number(value);
+        if (Number.isFinite(n) && n > 0) {
+          next[key] = n;
+        }
+      });
+      return next;
+    } catch {
+      return {} as Record<string, number>;
+    }
+  };
+
+  const setMultiplierOverride = (id: string, multiplier: number) => {
+    const current = getMultiplierOverrides();
+    current[id] = Math.max(0.1, Number(multiplier) || 1);
+    localStorage.setItem(STORAGE_MULTIPLIER_OVERRIDES, JSON.stringify(current));
+  };
+
+  const clearMultiplierOverride = (id: string) => {
+    const current = getMultiplierOverrides();
+    if (!(id in current)) return;
+    delete current[id];
+    localStorage.setItem(STORAGE_MULTIPLIER_OVERRIDES, JSON.stringify(current));
+  };
+
   useEffect(() => {
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
     const savedProfile = localStorage.getItem(STORAGE_PROFILE);
@@ -291,7 +324,16 @@ export default function HomePage() {
             multiplier: Number(r.multiplier) || 1,
             source: (normalizeSource(r.source || 'photo') as NutritionRecord['source']),
           }));
-          setRecords(mapped as NutritionRecord[]);
+          const overrides = getMultiplierOverrides();
+          const withLocalMultiplier = mapped.map((record: NutritionRecord) => {
+            const localMultiplier = overrides[record.id];
+            if (!localMultiplier || Math.abs(localMultiplier - (record.multiplier || 1)) < 0.0001) {
+              return record;
+            }
+            return applyMultiplierToRecord(record, localMultiplier);
+          });
+
+          setRecords(withLocalMultiplier as NutritionRecord[]);
         }
       } catch (e) {
         console.error(e);
@@ -368,6 +410,10 @@ export default function HomePage() {
   useEffect(() => {
     localStorage.setItem(STORAGE_PROFILE, JSON.stringify(profile));
   }, [profile]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_RECORDS, JSON.stringify(records));
+  }, [records]);
 
   const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 
@@ -830,8 +876,9 @@ export default function HomePage() {
     }
 
     if (!isSupabaseConfigured) {
-      setStatusMessage('Supabase が未設定です。倍率を保存できません。');
-      return false;
+      setMultiplierOverride(id, nextMultiplier);
+      setStatusMessage('Supabase が未設定のため、倍率はこの端末にのみ保存しました。');
+      return true;
     }
 
     const payload = {
@@ -856,17 +903,15 @@ export default function HomePage() {
 
       if (error) {
         console.error('[multiplier:update] query error', { id, payload, error });
-        if (previousRecord) {
-          setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
-        }
+        setMultiplierOverride(id, nextMultiplier);
         const message = formatSupabaseError(error).toLowerCase();
         const missingMultiplierColumn = /multiplier/.test(message) && /column|does not exist|schema cache/.test(message);
         if (missingMultiplierColumn) {
-          setStatusMessage('倍率列が見つかりません。db/supabase_create_table.sql の ALTER TABLE を実行してください。');
+          setStatusMessage('倍率列が見つかりません。db/supabase_create_table.sql の ALTER TABLE を実行してください（端末には保存済み）。');
         } else {
-          setStatusMessage(`倍率の保存に失敗しました: ${formatSupabaseError(error)}`);
+          setStatusMessage(`倍率の保存に失敗しました（端末には保存済み）: ${formatSupabaseError(error)}`);
         }
-        return false;
+        return true;
       }
 
       const updatedRow = Array.isArray(data) ? data[0] : undefined;
@@ -889,24 +934,20 @@ export default function HomePage() {
           verifyError: verify.error,
         });
 
-        if (previousRecord) {
-          setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
-        }
-
-        setStatusMessage('倍率の保存に失敗しました。RLSポリシーまたは更新権限を確認してください。');
-        return false;
+        setMultiplierOverride(id, nextMultiplier);
+        setStatusMessage('倍率の保存に失敗しました。RLSポリシーまたは更新権限を確認してください（端末には保存済み）。');
+        return true;
       }
 
       console.info('[multiplier:update] success', { id, payload, count, updatedMultiplier });
+      clearMultiplierOverride(id);
 
       return true;
     } catch (e) {
       console.error('[multiplier:update] unexpected error', { id, payload, error: e });
-      if (previousRecord) {
-        setRecords((prev) => prev.map((record) => (record.id === id ? previousRecord! : record)));
-      }
-      setStatusMessage('倍率の保存中に予期しないエラーが発生しました。');
-      return false;
+      setMultiplierOverride(id, nextMultiplier);
+      setStatusMessage('倍率の保存中に予期しないエラーが発生しました（端末には保存済み）。');
+      return true;
     }
   };
 
