@@ -580,7 +580,7 @@ export default function HomePage() {
       actualAmount,
       actualUnit,
       quantity: 1,
-      multiplier: 1,
+      multiplier: scanMode === 'label' ? Math.max(0.1, Number(actualAmount) || 1) : 1,
     } as PendingFood));
 
     setPendingFoods((prev) => [...queued, ...prev]);
@@ -654,16 +654,15 @@ export default function HomePage() {
           const selectedBaseUnit = item.labelBaseUnit;
           const intakeAmount = Math.max(0.1, Number(item.actualAmount) || selectedBaseAmount);
           const intakeUnit = item.actualUnit;
-          const scale = intakeAmount / selectedBaseAmount;
           estimateResponse = {
             name: result.estimate.name || '不明な食品',
             amountText: `${intakeAmount}${intakeUnit}`,
-            calories: Math.round((Number(result.estimate.calories) || 0) * scale * 10) / 10,
-            protein: Math.round((Number(result.estimate.protein) || 0) * scale * 10) / 10,
-            fat: Math.round((Number(result.estimate.fat) || 0) * scale * 10) / 10,
-            carbs: Math.round((Number(result.estimate.carbs) || 0) * scale * 10) / 10,
-            salt: Math.round((Number(result.estimate.salt) || 0) * scale * 10) / 10,
-            description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示を${intakeAmount}${intakeUnit}換算)`,
+            calories: Number(result.estimate.calories) || 0,
+            protein: Number(result.estimate.protein) || 0,
+            fat: Number(result.estimate.fat) || 0,
+            carbs: Number(result.estimate.carbs) || 0,
+            salt: Number(result.estimate.salt) || 0,
+            description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示。実際の入力量 ${intakeAmount}${intakeUnit} を倍率として適用)`,
             imageUrl: item.previewUrl,
           };
         } else {
@@ -685,7 +684,7 @@ export default function HomePage() {
           tempId: item.id,
           fileName: item.fileName,
           quantity: item.quantity,
-          multiplier: item.multiplier,
+          multiplier: item.mode === 'label' ? Math.max(0.1, Number(item.actualAmount) || 1) : item.multiplier,
           baseCalories: estimateResponse.calories,
           baseProtein: estimateResponse.protein,
           baseFat: estimateResponse.fat,
