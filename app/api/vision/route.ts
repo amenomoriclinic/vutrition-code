@@ -28,15 +28,22 @@ export async function POST(request: Request) {
         ? '1食分あたり'
         : '100gあたり';
 
+  const inferAbsorptionRate = (name: string, currentMode: string) => {
+    if (currentMode === 'label') return 0.85;
+    const n = name.toLowerCase();
+    const processedHints = /イノラス|エンシュア|プロテイン|スナック|カップ麺|ハム|ソーセージ|加工|レトルト|缶詰|インスタント|ドレッシング|マヨ|調味料|ジュース|清涼飲料|菓子|パン/.test(n);
+    return processedHints ? 0.85 : 0.5;
+  };
+
   if (mode !== 'text' && (!photo || !(photo instanceof File))) {
     return NextResponse.json({ error: 'Photo is required.' }, { status: 400 });
   }
 
   const prompt = mode === 'text'
-    ? `次の食品名・料理名から、一般的な日本の食品データベースを参考に、おおよその栄養素を推定してJSONだけを返してください。正確な商品名でなくても、類似品や一般的な分量を使って推定してください。入力: 食品名/料理名="${foodName || '不明'}", 量="${foodAmount || '未指定'}", 補足="${description || 'なし'}"。\n必ず以下の形式のJSONのみ返してください:\n{"name":"食品名","amountText":"1人前","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
+    ? `次の食品名・料理名から、一般的な日本の食品データベースを参考に、おおよその栄養素を推定してJSONだけを返してください。正確な商品名でなくても、類似品や一般的な分量を使って推定してください。リン含有量(mg)と吸収率も必ず返してください。吸収率ルール: 天然食品は0.5、加工食品・経腸栄養剤は0.85。入力: 食品名/料理名="${foodName || '不明'}", 量="${foodAmount || '未指定'}", 補足="${description || 'なし'}"。\n必ず以下の形式のJSONのみ返してください:\n{"name":"食品名","amountText":"1人前","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0,"phosphorus":0,"phosphorusAbsorptionRate":0.5}`
     : mode === 'label'
-      ? `この画像には食品パッケージの栄養成分表示が写っています。次の表示単位で栄養値を読み取ってください: ${unitText}（=${labelBaseAmount}${labelBaseUnit}あたり）。実際に食べた量は ${actualAmount}${actualUnit} です。栄養値は表示単位あたりの値を返し、換算は行わないでください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"${unitText}","baseAmount":${labelBaseAmount},"baseUnit":"${labelBaseUnit}","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`
-      : `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0}`;
+      ? `この画像には食品パッケージの栄養成分表示が写っています。次の表示単位で栄養値を読み取ってください: ${unitText}（=${labelBaseAmount}${labelBaseUnit}あたり）。実際に食べた量は ${actualAmount}${actualUnit} です。栄養値は表示単位あたりの値を返し、換算は行わないでください。リン含有量(mg)も返し、吸収率は加工食品として0.85にしてください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"${unitText}","baseAmount":${labelBaseAmount},"baseUnit":"${labelBaseUnit}","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0,"phosphorus":0,"phosphorusAbsorptionRate":0.85}`
+      : `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。リン含有量(mg)と吸収率も返してください。吸収率ルール: 天然食品は0.5、加工食品・経腸栄養剤は0.85。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0,"phosphorus":0,"phosphorusAbsorptionRate":0.5}`;
 
   const contentParts = mode === 'text'
     ? [{ type: 'text', text: prompt }]
@@ -83,12 +90,17 @@ export async function POST(request: Request) {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     const parsed = JSON.parse(text.slice(start, end + 1));
+    const parsedName = String(parsed.name || foodName || '食品');
+    const fallbackAbsorptionRate = inferAbsorptionRate(parsedName, mode);
+    parsed.phosphorus = Number(parsed.phosphorus) || 0;
+    parsed.phosphorusAbsorptionRate = Math.max(0, Math.min(1, Number(parsed.phosphorusAbsorptionRate) || fallbackAbsorptionRate));
     if (mode === 'label') {
       parsed.mode = 'label';
       parsed.consumedGrams = consumedGrams;
       parsed.baseAmount = Number(parsed.baseAmount) || labelBaseAmount;
       parsed.baseUnit = String(parsed.baseUnit || labelBaseUnit);
       parsed.amountText = String(parsed.amountText || unitText);
+      parsed.phosphorusAbsorptionRate = 0.85;
     }
     return NextResponse.json({ estimate: parsed });
   } catch {

@@ -18,6 +18,8 @@ type NutritionEstimate = {
   fat: number;
   carbs: number;
   salt: number;
+  phosphorus: number;
+  phosphorusAbsorptionRate: number;
   description: string;
   imageUrl?: string;
 };
@@ -32,6 +34,7 @@ type EditableEstimate = NutritionEstimate & {
   baseFat: number;
   baseCarbs: number;
   baseSalt: number;
+  basePhosphorus: number;
 };
 
 type PendingFood = {
@@ -70,6 +73,8 @@ type FavoriteFood = {
   fat: number;
   carbs: number;
   salt: number;
+  phosphorus: number;
+  phosphorusAbsorptionRate: number;
 };
 
 type NutritionRecordInsert = {
@@ -80,6 +85,8 @@ type NutritionRecordInsert = {
   fat: number;
   carbs: number;
   salt: number;
+  phosphorus?: number;
+  phosphorus_absorption_rate?: number;
   multiplier?: number;
   source?: string;
   description?: string | null;
@@ -143,6 +150,12 @@ const isLegacyInoras120 = (v: FavoriteFood) => {
   return id.includes('120') || name.includes('120ml') || name.includes('120ml') || name.includes('120ml');
 };
 
+const clampPhosphorusAbsorptionRate = (value: number) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0.5;
+  return Math.max(0, Math.min(1, n));
+};
+
 const STORAGE_RECORDS = 'nutrition_records';
 const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
@@ -158,6 +171,8 @@ const defaultFavorites: FavoriteFood[] = [
     fat: 9.0,
     carbs: 42.0,
     salt: 0.6,
+    phosphorus: 150,
+    phosphorusAbsorptionRate: 0.85,
   },
   {
     id: 'inoras-125-200',
@@ -168,6 +183,8 @@ const defaultFavorites: FavoriteFood[] = [
     fat: 5.6,
     carbs: 28.4,
     salt: 0.68,
+    phosphorus: 100,
+    phosphorusAbsorptionRate: 0.85,
   },
   {
     id: 'soy-sauce-tsp1',
@@ -178,6 +195,8 @@ const defaultFavorites: FavoriteFood[] = [
     fat: 0,
     carbs: 0.5,
     salt: 0.9,
+    phosphorus: 7,
+    phosphorusAbsorptionRate: 0.5,
   },
   {
     id: 'mayo-tbsp1',
@@ -188,6 +207,8 @@ const defaultFavorites: FavoriteFood[] = [
     fat: 11,
     carbs: 0.4,
     salt: 0.2,
+    phosphorus: 9,
+    phosphorusAbsorptionRate: 0.85,
   },
   {
     id: 'honey-tbsp1',
@@ -198,6 +219,8 @@ const defaultFavorites: FavoriteFood[] = [
     fat: 0,
     carbs: 17.2,
     salt: 0,
+    phosphorus: 1,
+    phosphorusAbsorptionRate: 0.5,
   },
   {
     id: 'ensure-liquid-h-250',
@@ -208,6 +231,8 @@ const defaultFavorites: FavoriteFood[] = [
     fat: 8.8,
     carbs: 31.3,
     salt: 0.49,
+    phosphorus: 175,
+    phosphorusAbsorptionRate: 0.85,
   },
 ];
 
@@ -324,6 +349,8 @@ export default function HomePage() {
               fat: Number(f.fat) || 0,
               carbs: Number(f.carbs) || 0,
               salt: Number(f.salt) || 0,
+              phosphorus: Number(f.phosphorus) || 0,
+              phosphorusAbsorptionRate: Math.max(0, Math.min(1, Number(f.phosphorusAbsorptionRate) || 0.5)),
             }))
             .filter((f) => !isLegacyInoras120(f));
           setFavorites(normalized);
@@ -371,6 +398,8 @@ export default function HomePage() {
             fat: Number(r.fat) || 0,
             carbs: Number(r.carbs) || 0,
             salt: Number(r.salt) || 0,
+            phosphorus: Number(r.phosphorus) || 0,
+            phosphorusAbsorptionRate: Math.max(0, Math.min(1, Number(r.phosphorus_absorption_rate) || 0.5)),
             description: r.description || '',
             imageUrl: r.image_url || undefined,
             createdAt: toJstDateString(r.created_at),
@@ -424,10 +453,11 @@ export default function HomePage() {
           acc.fat += record.fat;
           acc.carbs += record.carbs;
           acc.salt += record.salt;
+          acc.absorbedPhosphorus += (Number(record.phosphorus) || 0) * (Number(record.phosphorusAbsorptionRate) || 0);
         }
         return acc;
       },
-      { calories: 0, protein: 0, fat: 0, carbs: 0, salt: 0 }
+      { calories: 0, protein: 0, fat: 0, carbs: 0, salt: 0, absorbedPhosphorus: 0 }
     );
   }, [filteredRecords]);
 
@@ -449,6 +479,9 @@ export default function HomePage() {
     const carbsPct = ((recommended.carbs_pct_min ?? 50) + (recommended.carbs_pct_max ?? 65)) / 2;
     return Math.round(((recommended.kcal * carbsPct) / 100 / 4) * 10) / 10;
   }, [recommended]);
+
+  const phosphorusUpperLimit = useMemo(() => (profile.sex === 'male' ? 400 : 300), [profile.sex]);
+  const phosphorusWarningThreshold = useMemo(() => phosphorusUpperLimit * 0.8, [phosphorusUpperLimit]);
 
   const estimatedEnergy = useMemo(() => {
     // estimated daily energy requirement (simple PAL model)
@@ -620,6 +653,8 @@ export default function HomePage() {
           fat: target.fat,
           carbs: target.carbs,
           salt: target.salt,
+          phosphorus: target.phosphorus,
+          phosphorus_absorption_rate: target.phosphorus_absorption_rate,
           description: target.description || null,
         }));
 
@@ -641,6 +676,8 @@ export default function HomePage() {
     fat: Number(row.fat) || fallback?.fat || 0,
     carbs: Number(row.carbs) || fallback?.carbs || 0,
     salt: Number(row.salt) || fallback?.salt || 0,
+    phosphorus: Number(row.phosphorus) || fallback?.phosphorus || 0,
+    phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(row.phosphorus_absorption_rate) || fallback?.phosphorusAbsorptionRate || 0.5),
     description: row.description || fallback?.description || '',
     imageUrl: row.image_url || fallback?.imageUrl || undefined,
     createdAt: toJstDateString(row.created_at),
@@ -662,6 +699,7 @@ export default function HomePage() {
       fat: round1(estimate.baseFat * scale),
       carbs: round1(estimate.baseCarbs * scale),
       salt: round1(estimate.baseSalt * scale),
+      phosphorus: round1(estimate.basePhosphorus * scale),
     };
   };
 
@@ -810,6 +848,8 @@ export default function HomePage() {
             fat: Number(result.estimate.fat) || 0,
             carbs: Number(result.estimate.carbs) || 0,
             salt: Number(result.estimate.salt) || 0,
+            phosphorus: Number(result.estimate.phosphorus) || 0,
+            phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(result.estimate.phosphorusAbsorptionRate) || 0.5),
             description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示。実際の入力量 ${intakeAmount}${intakeUnit} を倍率として適用)`,
             imageUrl: item.previewUrl,
           };
@@ -822,6 +862,8 @@ export default function HomePage() {
             fat: Number(result.estimate.fat) || 0,
             carbs: Number(result.estimate.carbs) || 0,
             salt: Number(result.estimate.salt) || 0,
+            phosphorus: Number(result.estimate.phosphorus) || 0,
+            phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(result.estimate.phosphorusAbsorptionRate) || 0.5),
             description: item.description,
             imageUrl: item.previewUrl,
           };
@@ -838,6 +880,7 @@ export default function HomePage() {
           baseFat: estimateResponse.fat,
           baseCarbs: estimateResponse.carbs,
           baseSalt: estimateResponse.salt,
+          basePhosphorus: estimateResponse.phosphorus,
         }));
         successCount += 1;
       }
@@ -875,6 +918,8 @@ export default function HomePage() {
         fat: round1(target.fat),
         carbs: round1(target.carbs),
         salt: round1(target.salt),
+        phosphorus: round1(target.phosphorus),
+        phosphorus_absorption_rate: clampPhosphorusAbsorptionRate(target.phosphorusAbsorptionRate),
         multiplier: round1((target.quantity || 1) * (target.multiplier || 1)),
         source: 'photo',
         description: target.description || null,
@@ -901,6 +946,8 @@ export default function HomePage() {
           fat: Number(r.fat) || 0,
           carbs: Number(r.carbs) || 0,
           salt: Number(r.salt) || 0,
+          phosphorus: Number(r.phosphorus) || 0,
+          phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(r.phosphorus_absorption_rate) || 0.5),
           description: r.description || '',
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
@@ -936,6 +983,8 @@ export default function HomePage() {
       fat: favorite.fat,
       carbs: favorite.carbs,
       salt: favorite.salt,
+      phosphorus: favorite.phosphorus,
+      phosphorus_absorption_rate: favorite.phosphorusAbsorptionRate,
       multiplier: 1,
       source: 'favorite',
       description: favorite.name,
@@ -961,6 +1010,8 @@ export default function HomePage() {
           fat: Number(r.fat) || favorite.fat,
           carbs: Number(r.carbs) || favorite.carbs,
           salt: Number(r.salt) || favorite.salt,
+          phosphorus: Number(r.phosphorus) || favorite.phosphorus,
+          phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(r.phosphorus_absorption_rate) || favorite.phosphorusAbsorptionRate),
           description: r.description || favorite.name,
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
@@ -990,6 +1041,8 @@ export default function HomePage() {
       fat: 0,
       carbs: 0,
       salt: 0,
+      phosphorus: 0,
+      phosphorusAbsorptionRate: 0.5,
     };
     setFavorites([newFavorite, ...favorites]);
     setFavoriteName('');
@@ -1037,6 +1090,7 @@ export default function HomePage() {
       fat: round1(record.fat * ratio),
       carbs: round1(record.carbs * ratio),
       salt: round1(record.salt * ratio),
+      phosphorus: round1(record.phosphorus * ratio),
     };
   };
 
@@ -1077,6 +1131,7 @@ export default function HomePage() {
         fat: updatedRecord.fat,
         carbs: updatedRecord.carbs,
         salt: updatedRecord.salt,
+        phosphorus: updatedRecord.phosphorus,
         multiplier: updatedRecord.multiplier,
       };
 
@@ -1481,10 +1536,25 @@ export default function HomePage() {
                     <span>塩(g)</span>
                     <input type="number" step="0.1" value={estimate.baseSalt} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
                   </label>
+                  <label className="estimate-inline-field">
+                    <span>リン(mg)</span>
+                    <input type="number" step="1" value={estimate.basePhosphorus} onChange={(e) => updateEstimate(estimate.tempId, { basePhosphorus: Number(e.target.value) || 0 })} />
+                  </label>
+                  <label className="estimate-inline-field">
+                    <span>吸収率</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={estimate.phosphorusAbsorptionRate}
+                      onChange={(e) => updateEstimate(estimate.tempId, { phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(e.target.value)) })}
+                    />
+                  </label>
                 </div>
                 <div className="summary-item" style={{ marginTop: 8 }}>
                   <span>再計算後</span>
-                  <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 塩 {estimate.salt.toFixed(1)}g</strong>
+                  <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 塩 {estimate.salt.toFixed(1)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
                 </div>
               </div>
             ))}
@@ -1593,6 +1663,13 @@ export default function HomePage() {
           <span>食塩相当量</span>
           <strong>{totals.salt.toFixed(1)} g</strong>
         </div>
+        <div className="summary-item">
+          <span>吸収リン合計</span>
+          <strong>{totals.absorbedPhosphorus.toFixed(1)} mg（目安上限 {phosphorusUpperLimit}mg）</strong>
+        </div>
+        {totals.absorbedPhosphorus >= phosphorusWarningThreshold ? (
+          <p><small className="weekly-summary-error">リン摂取量が上限に近づいています</small></p>
+        ) : null}
         <div className="summary-item">
           <span>基礎代謝の目安</span>
           <strong>{basalMetabolism.toFixed(0)} kcal</strong>
