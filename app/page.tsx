@@ -1094,10 +1094,34 @@ export default function HomePage() {
         <h2 className="section-title">食事記録</h2>
         <div className="field-grid">
           <div>
-            <div style={{display:'flex', gap:8, marginBottom:8, flexWrap:'wrap'}}>
-              <button type="button" onClick={() => setScanMode('food')} style={{padding:8, borderRadius:6, background: scanMode==='food' ? '#0b74de' : '#eee', color: scanMode==='food' ? '#fff' : '#000'}}>料理写真</button>
-              <button type="button" onClick={() => setScanMode('label')} style={{padding:8, borderRadius:6, background: scanMode==='label' ? '#0b74de' : '#eee', color: scanMode==='label' ? '#fff' : '#000'}}>栄養表示ラベル</button>
-              <button type="button" onClick={() => setScanMode('text')} style={{padding:8, borderRadius:6, background: scanMode==='text' ? '#0b74de' : '#eee', color: scanMode==='text' ? '#fff' : '#000'}}>テキスト入力</button>
+            <div className="scan-mode-tabs" role="tablist" aria-label="食事記録モード">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scanMode === 'food'}
+                className={`scan-mode-tab ${scanMode === 'food' ? 'is-active' : ''}`}
+                onClick={() => setScanMode('food')}
+              >
+                料理写真
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scanMode === 'label'}
+                className={`scan-mode-tab ${scanMode === 'label' ? 'is-active' : ''}`}
+                onClick={() => setScanMode('label')}
+              >
+                栄養表示ラベル
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scanMode === 'text'}
+                className={`scan-mode-tab ${scanMode === 'text' ? 'is-active' : ''}`}
+                onClick={() => setScanMode('text')}
+              >
+                テキスト入力
+              </button>
             </div>
             <small>
               {scanMode === 'food'
@@ -1109,10 +1133,19 @@ export default function HomePage() {
           </div>
 
           {scanMode !== 'text' ? (
-            <label>
-              写真
-              <input type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoChange} />
-            </label>
+            <div className="camera-upload-field">
+              <span className="camera-upload-label">写真</span>
+              <input
+                id="meal-photo-upload"
+                className="camera-upload-input"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                multiple
+                onChange={handlePhotoChange}
+              />
+              <label className="camera-upload-button" htmlFor="meal-photo-upload">📷 撮影・選択</label>
+            </div>
           ) : null}
 
           {scanMode === 'label' ? (

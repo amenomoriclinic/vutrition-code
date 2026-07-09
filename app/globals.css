@@ -156,6 +156,77 @@ small {
   color: #64748b;
 }
 
+.scan-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.scan-mode-tab {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 10px 8px;
+  min-height: 44px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.scan-mode-tab.is-active {
+  background: #0b74de;
+  color: #ffffff;
+  border-color: #0b74de;
+}
+
+.camera-upload-field {
+  display: block;
+}
+
+.camera-upload-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #334155;
+}
+
+.camera-upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.camera-upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  min-width: 180px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.camera-upload-button:active {
+  transform: translateY(1px);
+}
+
 .image-preview {
   width: 100%;
   max-width: 360px;
@@ -532,6 +603,24 @@ small {
   .record-nutrients {
     font-size: 0.7rem;
   }
+
+  .scan-mode-tabs {
+    gap: 6px;
+  }
+
+  .scan-mode-tab {
+    min-height: 46px;
+    font-size: 0.84rem;
+    padding: 9px 6px;
+  }
+
+  .camera-upload-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    font-size: 0.95rem;
+  }
+
   .favorite-item .button-danger {
     width: auto;
   }
