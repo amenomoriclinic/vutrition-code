@@ -21,6 +21,16 @@ create table if not exists public.nutrition_records (
   created_at timestamptz default now()
 );
 
+create table if not exists public.health_records (
+  id uuid default gen_random_uuid() primary key,
+  date date not null,
+  weight numeric,
+  systolic_bp integer,
+  diastolic_bp integer,
+  pulse integer,
+  created_at timestamptz default now()
+);
+
 alter table public.nutrition_records
   add column if not exists multiplier numeric default 1;
 
@@ -53,3 +63,4 @@ set phosphorus_absorption_rate = 0.5
 where phosphorus_absorption_rate is null;
 
 create index if not exists idx_nutrition_records_created_at on public.nutrition_records(created_at desc);
+create index if not exists idx_health_records_date on public.health_records(date desc);

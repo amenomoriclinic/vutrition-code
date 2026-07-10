@@ -102,6 +102,17 @@ type WeeklySummaryAnalysis = {
   }>;
   patternInsights: string[];
   actionSuggestions: string[];
+  healthTrend: string[];
+};
+
+type HealthRecord = {
+  id: string;
+  date: string;
+  weight: number | null;
+  systolicBp: number | null;
+  diastolicBp: number | null;
+  pulse: number | null;
+  createdAt?: string;
 };
 
 type WeeklySummaryResult = {
@@ -115,6 +126,7 @@ type WeeklySummaryResult = {
     salt: number;
   };
   exerciseCaloriesTotal: number;
+  healthRecords: HealthRecord[];
   analysis: WeeklySummaryAnalysis;
 };
 
@@ -305,6 +317,15 @@ export default function HomePage() {
   const [weeklySummaryLoading, setWeeklySummaryLoading] = useState(false);
   const [weeklySummaryError, setWeeklySummaryError] = useState('');
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummaryResult | null>(null);
+  const [healthForm, setHealthForm] = useState({
+    weight: '',
+    systolicBp: '',
+    diastolicBp: '',
+    pulse: '',
+  });
+  const [healthToday, setHealthToday] = useState<HealthRecord | null>(null);
+  const [healthSaving, setHealthSaving] = useState(false);
+  const [healthStatusMessage, setHealthStatusMessage] = useState('');
   const bulkRecordSaveResetTimer = useRef<number | null>(null);
 
   const resetBulkRecordSaveStateAfterDelay = () => {
@@ -457,6 +478,10 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    void loadHealthRecords();
+  }, []);
+
+  useEffect(() => {
     if (photoFiles.length === 0) {
       setPhotoPreviews([]);
       return;
@@ -559,6 +584,124 @@ export default function HomePage() {
     return [error.message, error.details, error.hint].filter(Boolean).join(' / ');
   };
 
+  const parseNullableNumber = (value: string) => {
+    if (!value.trim()) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const mapHealthRecord = (row: any): HealthRecord => ({
+    id: String(row.id),
+    date: String(row.date),
+    weight: row.weight === null || row.weight === undefined ? null : Number(row.weight),
+    systolicBp: row.systolic_bp === null || row.systolic_bp === undefined ? null : Number(row.systolic_bp),
+    diastolicBp: row.diastolic_bp === null || row.diastolic_bp === undefined ? null : Number(row.diastolic_bp),
+    pulse: row.pulse === null || row.pulse === undefined ? null : Number(row.pulse),
+    createdAt: row.created_at ? String(row.created_at) : undefined,
+  });
+
+  const loadHealthRecords = async () => {
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    const today = toJstDateString();
+    const since = new Date();
+    since.setDate(since.getDate() - 6);
+    const periodStart = toJstDateString(since);
+
+    const { data, error } = await supabase
+      .from('health_records')
+      .select('id,date,weight,systolic_bp,diastolic_bp,pulse,created_at')
+      .gte('date', periodStart)
+      .lte('date', today)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[health] fetch failed', error);
+      return;
+    }
+
+    const rows = (data || []).map(mapHealthRecord);
+    const latestByDate = new Map<string, HealthRecord>();
+    rows.forEach((row) => {
+      if (!latestByDate.has(row.date)) {
+        latestByDate.set(row.date, row);
+      }
+    });
+
+    const todayRecord = latestByDate.get(today) || null;
+    setHealthToday(todayRecord);
+
+    if (todayRecord) {
+      setHealthForm({
+        weight: todayRecord.weight == null ? '' : String(todayRecord.weight),
+        systolicBp: todayRecord.systolicBp == null ? '' : String(todayRecord.systolicBp),
+        diastolicBp: todayRecord.diastolicBp == null ? '' : String(todayRecord.diastolicBp),
+        pulse: todayRecord.pulse == null ? '' : String(todayRecord.pulse),
+      });
+    }
+  };
+
+  const saveDailyHealthRecord = async () => {
+    if (!isSupabaseConfigured) {
+      setHealthStatusMessage('Supabase が未設定のため保存できません。');
+      return;
+    }
+
+    const weight = parseNullableNumber(healthForm.weight);
+    const systolicBp = parseNullableNumber(healthForm.systolicBp);
+    const diastolicBp = parseNullableNumber(healthForm.diastolicBp);
+    const pulse = parseNullableNumber(healthForm.pulse);
+
+    if (weight == null && systolicBp == null && diastolicBp == null && pulse == null) {
+      setHealthStatusMessage('体重・血圧・脈拍のいずれかを入力してください。');
+      return;
+    }
+
+    setHealthSaving(true);
+    setHealthStatusMessage('');
+
+    try {
+      const today = toJstDateString();
+      const { data: existingRows, error: existingError } = await supabase
+        .from('health_records')
+        .select('id,date,created_at')
+        .eq('date', today)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (existingError) {
+        throw existingError;
+      }
+
+      const payload = {
+        date: today,
+        weight,
+        systolic_bp: systolicBp,
+        diastolic_bp: diastolicBp,
+        pulse,
+      };
+
+      if (existingRows && existingRows[0]?.id) {
+        const { error } = await supabase.from('health_records').update(payload).eq('id', existingRows[0].id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('health_records').insert(payload);
+        if (error) throw error;
+      }
+
+      setHealthStatusMessage('記録しました');
+      await loadHealthRecords();
+    } catch (error) {
+      console.error('[health] save failed', error);
+      setHealthStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
+    } finally {
+      setHealthSaving(false);
+    }
+  };
+
   const fetchWeeklySummary = async () => {
     if (!isSupabaseConfigured) {
       setWeeklySummaryError('Supabase が未設定のため、先週サマリーを取得できません。');
@@ -583,11 +726,31 @@ export default function HomePage() {
         .gte('created_at', since.toISOString())
         .lte('created_at', now.toISOString());
 
+      const { data: healthData, error: healthError } = await supabase
+        .from('health_records')
+        .select('id,date,weight,systolic_bp,diastolic_bp,pulse,created_at')
+        .gte('date', periodStart)
+        .lte('date', periodEnd)
+        .order('date', { ascending: true })
+        .order('created_at', { ascending: false });
+
       if (error) {
         throw new Error(`Supabase取得エラー: ${formatSupabaseError(error)}`);
       }
 
+      if (healthError) {
+        throw new Error(`健康記録の取得エラー: ${formatSupabaseError(healthError)}`);
+      }
+
       const rows = data || [];
+      const weeklyHealthRows = (healthData || []).map(mapHealthRecord);
+      const healthByDate = new Map<string, HealthRecord>();
+      weeklyHealthRows.forEach((row) => {
+        if (!healthByDate.has(row.date)) {
+          healthByDate.set(row.date, row);
+        }
+      });
+      const healthRecords = Array.from(healthByDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 
       const intakeTotals = rows.reduce(
         (acc, row: any) => {
@@ -644,6 +807,13 @@ export default function HomePage() {
             carbs: recommendedCarbsGrams,
             salt: recommended.salt,
           },
+          healthTrend: healthRecords.map((item) => ({
+            date: item.date,
+            weight: item.weight,
+            systolicBp: item.systolicBp,
+            diastolicBp: item.diastolicBp,
+            pulse: item.pulse,
+          })),
           profile,
         }),
       });
@@ -658,6 +828,7 @@ export default function HomePage() {
         periodEnd,
         averages,
         exerciseCaloriesTotal: round1(exerciseCaloriesTotal),
+        healthRecords,
         analysis: analysisJson.analysis,
       });
       setStatusMessage('先週のサマリーを更新しました。');
@@ -1668,6 +1839,56 @@ export default function HomePage() {
       </div>
 
       <div className="page-card">
+        <h2 className="section-title">毎日の健康記録</h2>
+        <div className="field-grid field-grid-2">
+          <label>
+            体重(kg)
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={healthForm.weight}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, weight: e.target.value }))}
+            />
+          </label>
+          <label>
+            脈拍
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={healthForm.pulse}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, pulse: e.target.value }))}
+            />
+          </label>
+          <label>
+            血圧（収縮期）
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={healthForm.systolicBp}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, systolicBp: e.target.value }))}
+            />
+          </label>
+          <label>
+            血圧（拡張期）
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={healthForm.diastolicBp}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, diastolicBp: e.target.value }))}
+            />
+          </label>
+        </div>
+        <button className="button-primary" type="button" disabled={healthSaving} onClick={() => { void saveDailyHealthRecord(); }}>
+          {healthSaving ? '保存中...' : '記録する'}
+        </button>
+        {healthStatusMessage ? <p><small>{healthStatusMessage}</small></p> : null}
+      </div>
+
+      <div className="page-card">
         <h2 className="section-title">日次集計</h2>
         <label>
           日付を選択
@@ -1698,6 +1919,14 @@ export default function HomePage() {
         <div className="summary-item">
           <span>食塩相当量</span>
           <strong>{totals.salt.toFixed(1)} g</strong>
+        </div>
+        <div className="summary-item">
+          <span>本日の体重</span>
+          <strong>{healthToday?.weight != null ? `${healthToday.weight.toFixed(1)} kg` : '未記録'}</strong>
+        </div>
+        <div className="summary-item">
+          <span>本日の血圧</span>
+          <strong>{healthToday?.systolicBp != null && healthToday?.diastolicBp != null ? `${healthToday.systolicBp}/${healthToday.diastolicBp} mmHg` : '未記録'}</strong>
         </div>
         <div className="summary-item">
           <span>吸収リン合計</span>
@@ -1803,6 +2032,24 @@ export default function HomePage() {
                   <li key={`suggestion-${idx}`}>{item}</li>
                 ))}
               </ul>
+            </div>
+            <div className="weekly-summary-block">
+              <h4>体重・血圧の推移</h4>
+              {weeklySummary.analysis.healthTrend.length > 0 ? (
+                <ul>
+                  {weeklySummary.analysis.healthTrend.map((item, idx) => (
+                    <li key={`health-trend-${idx}`}>{item}</li>
+                  ))}
+                </ul>
+              ) : weeklySummary.healthRecords.length > 0 ? (
+                <ul>
+                  {weeklySummary.healthRecords.map((item) => (
+                    <li key={`health-row-${item.id}`}>{item.date}: 体重 {item.weight ?? '-'}kg / 血圧 {item.systolicBp ?? '-'}/{item.diastolicBp ?? '-'} / 脈拍 {item.pulse ?? '-'}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>記録なし</p>
+              )}
             </div>
           </div>
         ) : null}

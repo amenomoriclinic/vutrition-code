@@ -20,6 +20,13 @@ type WeeklySummaryRequest = {
     carbs: number;
     salt: number;
   };
+  healthTrend?: Array<{
+    date: string;
+    weight: number | null;
+    systolicBp: number | null;
+    diastolicBp: number | null;
+    pulse: number | null;
+  }>;
   profile?: {
     age?: number;
     sex?: 'male' | 'female';
@@ -57,13 +64,15 @@ export async function POST(request: Request) {
     '    {"nutrient":"カロリー|タンパク質|脂質|炭水化物|食塩相当量","status":"不足|適正|過剰","comment":"理由を短く"}',
     '  ],',
     '  "patternInsights": ["食事パターンの傾向を短文で3件以内"],',
-    '  "actionSuggestions": ["改善提案を具体的に3件以内"]',
+    '  "actionSuggestions": ["改善提案を具体的に3件以内"],',
+    '  "healthTrend": ["体重・血圧の推移コメントを短文で3件以内"]',
     '}',
     '',
     `対象期間: ${body.periodStart} から ${body.periodEnd}`,
     `7日平均摂取: kcal=${body.averages.calories}, P=${body.averages.protein}g, F=${body.averages.fat}g, C=${body.averages.carbs}g, 塩=${body.averages.salt}g`,
     `7日運動消費カロリー合計: ${body.exerciseCaloriesTotal} kcal`,
     `DRI推奨値(1日): kcal=${body.recommendedDaily.calories}, P=${body.recommendedDaily.protein}g, F=${body.recommendedDaily.fat}g, C=${body.recommendedDaily.carbs}g, 塩=${body.recommendedDaily.salt}g`,
+    `健康記録推移: ${JSON.stringify(body.healthTrend || [])}`,
     `プロフィール: ${JSON.stringify(body.profile || {})}`,
   ].join('\n');
 
@@ -110,6 +119,9 @@ export async function POST(request: Request) {
         : [],
       actionSuggestions: Array.isArray(parsed.actionSuggestions)
         ? parsed.actionSuggestions.slice(0, 3).map((item: any) => String(item || '')).filter(Boolean)
+        : [],
+      healthTrend: Array.isArray(parsed.healthTrend)
+        ? parsed.healthTrend.slice(0, 3).map((item: any) => String(item || '')).filter(Boolean)
         : [],
     };
 
