@@ -1840,9 +1840,9 @@ export default function HomePage() {
 
       <div className="page-card">
         <h2 className="section-title">毎日の健康記録</h2>
-        <div className="field-grid field-grid-2">
-          <label>
-            体重(kg)
+        <div className="health-inline-grid">
+          <label className="health-inline-field">
+            体重kg
             <input
               type="number"
               step="0.1"
@@ -1851,7 +1851,7 @@ export default function HomePage() {
               onChange={(e) => setHealthForm((prev) => ({ ...prev, weight: e.target.value }))}
             />
           </label>
-          <label>
+          <label className="health-inline-field">
             脈拍
             <input
               type="number"
@@ -1861,8 +1861,8 @@ export default function HomePage() {
               onChange={(e) => setHealthForm((prev) => ({ ...prev, pulse: e.target.value }))}
             />
           </label>
-          <label>
-            血圧（収縮期）
+          <label className="health-inline-field">
+            収縮期
             <input
               type="number"
               step="1"
@@ -1871,8 +1871,8 @@ export default function HomePage() {
               onChange={(e) => setHealthForm((prev) => ({ ...prev, systolicBp: e.target.value }))}
             />
           </label>
-          <label>
-            血圧（拡張期）
+          <label className="health-inline-field">
+            拡張期
             <input
               type="number"
               step="1"
@@ -1882,7 +1882,7 @@ export default function HomePage() {
             />
           </label>
         </div>
-        <button className="button-primary" type="button" disabled={healthSaving} onClick={() => { void saveDailyHealthRecord(); }}>
+        <button className="button-primary health-save-button" type="button" disabled={healthSaving} onClick={() => { void saveDailyHealthRecord(); }}>
           {healthSaving ? '保存中...' : '記録する'}
         </button>
         {healthStatusMessage ? <p><small>{healthStatusMessage}</small></p> : null}

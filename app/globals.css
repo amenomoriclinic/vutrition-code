@@ -78,6 +78,27 @@ main {
   gap: 12px;
 }
 
+.health-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.health-inline-field {
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.health-inline-field input {
+  padding: 7px 8px;
+  font-size: 0.84rem;
+  border-radius: 10px;
+}
+
+.health-save-button {
+  margin-top: 10px;
+}
+
 .favorite-item {
   display: flex;
   gap: 6px;
@@ -632,6 +653,20 @@ small {
   .record-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .health-inline-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .health-inline-field {
+    font-size: 0.74rem;
+  }
+
+  .health-inline-field input {
+    padding: 6px 7px;
+    font-size: 0.8rem;
   }
 
   .record-row {
