@@ -1520,14 +1520,6 @@ export default function HomePage() {
                   <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
                   <small>{item.mode === 'label' ? `栄養ラベル ${labelDisplayUnitOptions[item.labelDisplayUnit].label} / 実際 ${item.actualAmount}${item.actualUnit}` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
                 </div>
-                <label>
-                  個数
-                  <input type="number" min="0.1" step="0.1" value={item.quantity} onChange={(e) => updatePendingFood(item.id, { quantity: Number(e.target.value) || 1 })} />
-                </label>
-                <label>
-                  倍率
-                  <input type="number" min="0.1" step="0.1" value={item.multiplier} onChange={(e) => updatePendingFood(item.id, { multiplier: Number(e.target.value) || 1 })} />
-                </label>
                 <button type="button" className="button-danger pending-remove" onClick={() => removePendingFood(item.id)}>
                   削除
                 </button>
@@ -1557,14 +1549,6 @@ export default function HomePage() {
                   <label>
                     推定量の表示
                     <input value={estimate.amountText} onChange={(e) => updateEstimate(estimate.tempId, { amountText: e.target.value })} />
-                  </label>
-                  <label>
-                    個数
-                    <input type="number" min="0.1" step="0.1" value={estimate.quantity} onChange={(e) => updateEstimate(estimate.tempId, { quantity: Number(e.target.value) || 1 })} />
-                  </label>
-                  <label>
-                    倍率
-                    <input type="number" min="0.1" step="0.1" value={estimate.multiplier} onChange={(e) => updateEstimate(estimate.tempId, { multiplier: Number(e.target.value) || 1 })} />
                   </label>
                 </div>
                 <div className="estimate-nutrients-grid">
