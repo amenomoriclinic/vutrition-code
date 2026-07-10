@@ -1890,9 +1890,9 @@ export default function HomePage() {
 
       <div className="page-card">
         <h2 className="section-title">日次集計</h2>
-        <label>
-          日付を選択
-          <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+        <label className="date-filter-box">
+          <span className="date-filter-label">日付を選択</span>
+          <input className="date-filter-input" type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
         </label>
         <div className="summary-actions">
           <button className="button-secondary" type="button" onClick={() => { void fetchWeeklySummary(); }} disabled={weeklySummaryLoading}>
