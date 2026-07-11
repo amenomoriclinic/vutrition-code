@@ -1724,8 +1724,8 @@ export default function HomePage() {
               <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
                 {favorite.name}
               </button>
-              <button className="button-danger" type="button" onClick={() => removeFavorite(favorite.id)}>
-                削除
+              <button className="button-danger record-delete" type="button" aria-label="削除" onClick={() => removeFavorite(favorite.id)}>
+                ×
               </button>
             </div>
           ))}
@@ -2013,12 +2013,6 @@ export default function HomePage() {
           <span className="date-filter-label">日付を選択</span>
           <input className="date-filter-input" type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
         </label>
-        <div className="summary-actions">
-          <button className="button-secondary" type="button" onClick={() => { void fetchWeeklySummary(); }} disabled={weeklySummaryLoading}>
-            {weeklySummaryLoading ? '先週サマリーを分析中...' : '先週のサマリーを見る'}
-          </button>
-          {weeklySummaryError ? <small className="weekly-summary-error">{weeklySummaryError}</small> : null}
-        </div>
         <div className="summary-item">
           <span>総カロリー</span>
           <strong>{totals.calories.toFixed(0)} kcal</strong>
@@ -2230,6 +2224,15 @@ export default function HomePage() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="page-card">
+        <div className="summary-actions">
+          <button className="button-secondary" type="button" onClick={() => { void fetchWeeklySummary(); }} disabled={weeklySummaryLoading}>
+            {weeklySummaryLoading ? '先週サマリーを分析中...' : '先週のサマリーを見る'}
+          </button>
+          {weeklySummaryError ? <small className="weekly-summary-error">{weeklySummaryError}</small> : null}
+        </div>
       </div>
 
       <div className="page-card">
