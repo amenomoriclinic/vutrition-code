@@ -321,6 +321,29 @@ const labelDisplayUnitOptions: Record<LabelDisplayUnit, { label: string; baseAmo
   perServing: { label: '1食分あたり', baseAmount: 1, baseUnit: '食分', defaultActualUnit: '食分' },
 };
 
+const HEIGHT_STORAGE_KEY = 'nutrition-app-height';
+
+const readStoredHeight = (): number | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(HEIGHT_STORAGE_KEY);
+    if (raw == null || raw === '') return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredHeight = (height: number | null) => {
+  if (typeof window === 'undefined' || height == null) return;
+  try {
+    window.localStorage.setItem(HEIGHT_STORAGE_KEY, String(height));
+  } catch {
+    // Ignore storage failures (private mode, quota, etc.).
+  }
+};
+
 export default function HomePage() {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
@@ -351,9 +374,6 @@ export default function HomePage() {
   const [healthForm, setHealthForm] = useState({
     weight: '',
     bodyFat: '',
-    muscleMass: '',
-    boneMass: '',
-    metabolicAge: '',
     height: '',
     systolicBp: '',
     diastolicBp: '',
@@ -512,6 +532,14 @@ export default function HomePage() {
         console.error(e);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    const stored = readStoredHeight();
+    if (stored != null) {
+      setSavedHeight(stored);
+      setHealthForm((prev) => ({ ...prev, height: String(stored) }));
+    }
   }, []);
 
   useEffect(() => {
@@ -681,8 +709,15 @@ export default function HomePage() {
       }
     });
 
-    const latestWithHeight = rows.find((row) => row.height != null);
-    setSavedHeight(latestWithHeight?.height ?? null);
+    // Height is stored in localStorage; fall back to (and migrate from) any
+    // height previously saved to the database for existing users.
+    const stored = readStoredHeight();
+    const dbHeight = rows.find((row) => row.height != null)?.height ?? null;
+    const effectiveHeight = stored ?? dbHeight;
+    if (effectiveHeight != null && stored == null) {
+      writeStoredHeight(effectiveHeight);
+    }
+    setSavedHeight(effectiveHeight);
 
     const todayRecord = latestByDate.get(today) || null;
     setHealthToday(todayRecord);
@@ -691,10 +726,7 @@ export default function HomePage() {
       setHealthForm({
         weight: todayRecord.weight == null ? '' : String(todayRecord.weight),
         bodyFat: todayRecord.bodyFat == null ? '' : String(todayRecord.bodyFat),
-        muscleMass: todayRecord.muscleMass == null ? '' : String(todayRecord.muscleMass),
-        boneMass: todayRecord.boneMass == null ? '' : String(todayRecord.boneMass),
-        metabolicAge: todayRecord.metabolicAge == null ? '' : String(todayRecord.metabolicAge),
-        height: todayRecord.height == null ? (latestWithHeight?.height == null ? '' : String(latestWithHeight.height)) : String(todayRecord.height),
+        height: effectiveHeight != null ? String(effectiveHeight) : (todayRecord.height == null ? '' : String(todayRecord.height)),
         systolicBp: todayRecord.systolicBp == null ? '' : String(todayRecord.systolicBp),
         diastolicBp: todayRecord.diastolicBp == null ? '' : String(todayRecord.diastolicBp),
         pulse: todayRecord.pulse == null ? '' : String(todayRecord.pulse),
@@ -702,7 +734,7 @@ export default function HomePage() {
     } else {
       setHealthForm((prev) => ({
         ...prev,
-        height: latestWithHeight?.height == null ? prev.height : String(latestWithHeight.height),
+        height: effectiveHeight == null ? prev.height : String(effectiveHeight),
       }));
     }
   };
@@ -715,9 +747,6 @@ export default function HomePage() {
 
     const weight = parseNullableNumber(healthForm.weight);
     const bodyFat = parseNullableNumber(healthForm.bodyFat);
-    const muscleMass = parseNullableNumber(healthForm.muscleMass);
-    const boneMass = parseNullableNumber(healthForm.boneMass);
-    const metabolicAge = parseNullableNumber(healthForm.metabolicAge);
     const systolicBp = parseNullableNumber(healthForm.systolicBp);
     const diastolicBp = parseNullableNumber(healthForm.diastolicBp);
     const pulse = parseNullableNumber(healthForm.pulse);
@@ -730,8 +759,8 @@ export default function HomePage() {
       return;
     }
 
-    if (weight == null && bodyFat == null && muscleMass == null && boneMass == null && metabolicAge == null && systolicBp == null && diastolicBp == null && pulse == null) {
-      setHealthStatusMessage('体重・血圧・脈拍・体組成のいずれかを入力してください。');
+    if (weight == null && bodyFat == null && systolicBp == null && diastolicBp == null && pulse == null) {
+      setHealthStatusMessage('体重・体脂肪率・血圧・脈拍のいずれかを入力してください。');
       return;
     }
 
@@ -755,9 +784,6 @@ export default function HomePage() {
         date: today,
         weight,
         body_fat: bodyFat,
-        muscle_mass: muscleMass,
-        bone_mass: boneMass,
-        metabolic_age: metabolicAge == null ? null : Math.round(metabolicAge),
         height,
         bmi,
         systolic_bp: systolicBp,
@@ -776,6 +802,7 @@ export default function HomePage() {
       setHealthStatusMessage('記録しました');
       if (height != null) {
         setSavedHeight(height);
+        writeStoredHeight(height);
       }
       await loadHealthRecords();
     } catch (error) {
@@ -1942,6 +1969,16 @@ export default function HomePage() {
             />
           </label>
           <label className="health-inline-field">
+            体脂肪率%
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={healthForm.bodyFat}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, bodyFat: e.target.value }))}
+            />
+          </label>
+          <label className="health-inline-field">
             BMI
             <input
               type="text"
@@ -1952,16 +1989,6 @@ export default function HomePage() {
                 return bmi == null ? '' : bmi.toFixed(1);
               })()}
               readOnly
-            />
-          </label>
-          <label className="health-inline-field">
-            脈拍
-            <input
-              type="number"
-              step="1"
-              min="0"
-              value={healthForm.pulse}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, pulse: e.target.value }))}
             />
           </label>
           <label className="health-inline-field">
@@ -1985,43 +2012,13 @@ export default function HomePage() {
             />
           </label>
           <label className="health-inline-field">
-            体脂肪率%
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={healthForm.bodyFat}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, bodyFat: e.target.value }))}
-            />
-          </label>
-          <label className="health-inline-field">
-            筋肉量kg
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={healthForm.muscleMass}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, muscleMass: e.target.value }))}
-            />
-          </label>
-          <label className="health-inline-field">
-            推定骨量kg
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={healthForm.boneMass}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, boneMass: e.target.value }))}
-            />
-          </label>
-          <label className="health-inline-field">
-            代謝年齢
+            脈拍
             <input
               type="number"
               step="1"
               min="0"
-              value={healthForm.metabolicAge}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, metabolicAge: e.target.value }))}
+              value={healthForm.pulse}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, pulse: e.target.value }))}
             />
           </label>
         </div>
