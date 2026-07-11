@@ -410,6 +410,20 @@ small {
   max-width: 180px !important;
 }
 
+.estimate-media-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.estimate-remove {
+  min-width: auto;
+  padding: 7px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
 .estimate-meta-grid {
   gap: 10px;
 }
@@ -597,7 +611,7 @@ small {
 
 .pending-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-items: end;
   padding: 10px;
@@ -642,6 +656,16 @@ small {
 
   .estimate-image {
     max-width: 130px !important;
+  }
+
+  .estimate-media-row {
+    gap: 8px;
+    align-items: center;
+  }
+
+  .estimate-remove {
+    padding: 6px 9px;
+    font-size: 0.78rem;
   }
 
   .estimate-meta-grid {

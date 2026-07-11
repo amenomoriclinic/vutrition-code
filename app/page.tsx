@@ -1104,6 +1104,47 @@ export default function HomePage() {
     }));
   };
 
+  const extractAmountNumber = (text: string) => {
+    const match = String(text || '').match(/\d+(?:\.\d+)?/);
+    if (!match) return null;
+    const value = Number(match[0]);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+
+  const updateEstimateAmountText = (tempId: string, nextAmountText: string) => {
+    setEstimates((prev) => prev.map((estimate) => {
+      if (estimate.tempId !== tempId) return estimate;
+
+      const beforeAmount = extractAmountNumber(estimate.amountText);
+      const afterAmount = extractAmountNumber(nextAmountText);
+
+      if (!beforeAmount || !afterAmount) {
+        return { ...estimate, amountText: nextAmountText };
+      }
+
+      const scale = afterAmount / beforeAmount;
+      if (!Number.isFinite(scale) || scale <= 0) {
+        return { ...estimate, amountText: nextAmountText };
+      }
+
+      return recalcEstimate({
+        ...estimate,
+        amountText: nextAmountText,
+        baseCalories: round1(estimate.baseCalories * scale),
+        baseProtein: round1(estimate.baseProtein * scale),
+        baseFat: round1(estimate.baseFat * scale),
+        baseCarbs: round1(estimate.baseCarbs * scale),
+        baseSalt: round1(estimate.baseSalt * scale),
+        basePhosphorus: round1(estimate.basePhosphorus * scale),
+      });
+    }));
+  };
+
+  const removeEstimate = (tempId: string) => {
+    setEstimates((prev) => prev.filter((estimate) => estimate.tempId !== tempId));
+    removePendingFood(tempId);
+  };
+
   const saveAllEstimates = async () => {
     if (estimates.length === 0) {
       setStatusMessage('保存する推定結果がありません。');
@@ -1691,9 +1732,6 @@ export default function HomePage() {
                   <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
                   <small>{item.mode === 'label' ? `栄養ラベル ${labelDisplayUnitOptions[item.labelDisplayUnit].label} / 実際 ${item.actualAmount}${item.actualUnit}` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
                 </div>
-                <button type="button" className="button-danger pending-remove" onClick={() => removePendingFood(item.id)}>
-                  削除
-                </button>
               </div>
             ))}
           </div>
@@ -1711,7 +1749,12 @@ export default function HomePage() {
             {estimates.map((estimate) => (
               <div key={estimate.tempId} className="page-card estimate-card" style={{ marginBottom: 8 }}>
                 <p><small>{estimate.fileName}</small></p>
-                {estimate.imageUrl ? <img className="image-preview estimate-image" src={estimate.imageUrl} alt={estimate.fileName} style={{ maxWidth: 220 }} /> : null}
+                <div className="estimate-media-row">
+                  {estimate.imageUrl ? <img className="image-preview estimate-image" src={estimate.imageUrl} alt={estimate.fileName} style={{ maxWidth: 220 }} /> : null}
+                  <button type="button" className="button-danger estimate-remove" onClick={() => removeEstimate(estimate.tempId)}>
+                    削除
+                  </button>
+                </div>
                 <div className="field-grid field-grid-2 estimate-meta-grid">
                   <label>
                     料理名
@@ -1719,7 +1762,7 @@ export default function HomePage() {
                   </label>
                   <label>
                     推定量の表示
-                    <input value={estimate.amountText} onChange={(e) => updateEstimate(estimate.tempId, { amountText: e.target.value })} />
+                    <input value={estimate.amountText} onChange={(e) => updateEstimateAmountText(estimate.tempId, e.target.value)} />
                   </label>
                 </div>
                 <div className="estimate-nutrients-grid">
