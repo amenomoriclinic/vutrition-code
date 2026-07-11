@@ -267,17 +267,18 @@ const defaultFavorites: FavoriteFood[] = [
     phosphorus: 1,
     phosphorusAbsorptionRate: 0.5,
   },
-  {
-    id: 'ensure-liquid-h-250',
-    name: 'エンシュアリキッドH 250ml',
-    amountText: '250ml',
-    calories: 250,
-    protein: 10.5,
-    fat: 8.8,
-    carbs: 31.3,
-    salt: 0.49,
-    phosphorus: 175,
-    phosphorusAbsorptionRate: 0.85,
+  
+   {
+    id: 'chicken-thigh-1pc',
+    name: '鶏もも肉 1切れ（27g）',
+    amountText: '1切れ',
+    calories: 54,
+    protein: 4.5,
+    fat: 3.8,
+    carbs: 0,
+    salt: 0.1,
+    phosphorus: 43,
+    phosphorusAbsorptionRate: 0.5,
   },
 ];
 
