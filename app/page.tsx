@@ -1673,54 +1673,6 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {scanMode === 'label' ? (
-            <div className="field-grid field-grid-3">
-              <label>
-                表示単位
-                <select value={labelDisplayUnit} onChange={(e) => updateLabelDisplayUnit(e.target.value as LabelDisplayUnit)}>
-                  <option value="per100g">100gあたり</option>
-                  <option value="perPiece">1個（1本・1袋）あたり</option>
-                  <option value="per100ml">100mlあたり</option>
-                  <option value="perServing">1食分あたり</option>
-                </select>
-              </label>
-              <label>
-                実際に食べた量
-                <input
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={actualAmount}
-                  onChange={(e) => {
-                    const next = Number(e.target.value) || 0;
-                    setActualAmount(next);
-                    if (actualUnit === 'g') {
-                      setConsumedGrams(next);
-                    }
-                  }}
-                />
-              </label>
-              <label>
-                入力単位
-                <select
-                  value={actualUnit}
-                  onChange={(e) => {
-                    const next = e.target.value as LabelAmountUnit;
-                    setActualUnit(next);
-                    if (next === 'g') {
-                      setConsumedGrams(actualAmount);
-                    }
-                  }}
-                >
-                  <option value="g">g（固形）</option>
-                  <option value="ml">ml（液体）</option>
-                  <option value="個">個（個数）</option>
-                  <option value="食分">食分</option>
-                </select>
-              </label>
-            </div>
-          ) : null}
-
           {scanMode === 'text' ? (
             <>
               <label>
