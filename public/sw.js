@@ -1,85 +1,38 @@
-const CACHE_NAME = 'nutrition-app-v2';
-const ASSETS = [
-  '/',
-  '/manifest.json',
-  '/icons/icon-192.svg',
-  '/icons/icon-512.svg',
-];
+// Self-destructing service worker.
+//
+// A previous version of this app shipped a cache-first service worker that
+// held on to stale assets, so new deploys were not reflected until users
+// manually ran "Clear site data". This worker exists purely to undo that:
+// it caches nothing and, once activated, wipes every cache, unregisters
+// itself, and reloads any open tabs so they load the latest deploy.
+//
+// Browsers re-fetch sw.js on navigation / periodic update checks (bypassing
+// the HTTP cache), so even clients still controlled by the old worker will
+// pick this up automatically and clean themselves up.
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS).catch(() => {});
-    })
-  );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((k) => {
-          if (k !== CACHE_NAME) return caches.delete(k);
-        })
-      )
-    ).then(() => self.clients.claim())
+    (async () => {
+      // Remove every cache this origin created.
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+
+      // Unregister so no service worker controls the app going forward.
+      await self.registration.unregister();
+
+      // Reload open tabs so they fetch fresh, un-intercepted assets.
+      const clients = await self.clients.matchAll({ type: 'window' });
+      clients.forEach((client) => {
+        if ('navigate' in client) {
+          client.navigate(client.url);
+        }
+      });
+    })()
   );
 });
 
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-});
-
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-
-  const reqUrl = new URL(req.url);
-  const isHttpRequest = reqUrl.protocol === 'http:' || reqUrl.protocol === 'https:';
-  if (!isHttpRequest) {
-    return;
-  }
-
-  const tryCachePut = async (request, response) => {
-    try {
-      const resUrl = new URL(response.url || request.url);
-      const isHttpResponse = resUrl.protocol === 'http:' || resUrl.protocol === 'https:';
-      if (!isHttpResponse) return;
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response);
-    } catch (e) {
-      // Ignore cache write failures for unsupported schemes (e.g. chrome-extension:)
-    }
-  };
-
-  // Always prefer network for document requests so updated app shell is loaded quickly.
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const respClone = res.clone();
-          void tryCachePut(req, respClone);
-          return res;
-        })
-        .catch(() => caches.match(req).then((cached) => cached || caches.match('/')))
-    );
-    return;
-  }
-
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((res) => {
-          if (!res || res.status !== 200 || res.type !== 'basic') return res;
-          const respClone = res.clone();
-          void tryCachePut(req, respClone);
-          return res;
-        })
-        .catch(() => caches.match('/'));
-    })
-  );
-});
+// No fetch handler: every request goes straight to the network with no caching.

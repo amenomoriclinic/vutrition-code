@@ -2,44 +2,27 @@
 
 import { useEffect } from "react";
 
+// This app no longer uses a service worker. The previous cache-first worker
+// caused stale deploys to stick around until users manually cleared site
+// data, so instead of registering one we now actively tear down any worker
+// and cache left over from older versions on every load.
 export default function ServiceWorkerRegister() {
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      let hasRefreshed = false;
-
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (hasRefreshed) return;
-        hasRefreshed = true;
-        window.location.reload();
-      });
-
       navigator.serviceWorker
-        .register('/sw.js')
-        .then((reg) => {
-          const requestSkipWaiting = () => {
-            if (reg.waiting) {
-              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-            }
-          };
-
-          if (reg.waiting) {
-            requestSkipWaiting();
-          }
-
-          reg.addEventListener('updatefound', () => {
-            const newWorker = reg.installing;
-            if (!newWorker) return;
-
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                requestSkipWaiting();
-              }
-            });
+        .getRegistrations()
+        .then((registrations) => {
+          registrations.forEach((registration) => {
+            void registration.unregister();
           });
-
-          // Also poll once to detect updates for already-open sessions.
-          reg.update().catch(() => {});
         })
+        .catch(() => {});
+    }
+
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      caches
+        .keys()
+        .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
         .catch(() => {});
     }
   }, []);
