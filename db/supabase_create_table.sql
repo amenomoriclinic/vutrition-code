@@ -25,11 +25,35 @@ create table if not exists public.health_records (
   id uuid default gen_random_uuid() primary key,
   date date not null,
   weight numeric,
+  body_fat numeric,
+  muscle_mass numeric,
+  bone_mass numeric,
+  metabolic_age integer,
+  height numeric,
+  bmi numeric,
   systolic_bp integer,
   diastolic_bp integer,
   pulse integer,
   created_at timestamptz default now()
 );
+
+alter table public.health_records
+  add column if not exists body_fat numeric;
+
+alter table public.health_records
+  add column if not exists muscle_mass numeric;
+
+alter table public.health_records
+  add column if not exists bone_mass numeric;
+
+alter table public.health_records
+  add column if not exists metabolic_age integer;
+
+alter table public.health_records
+  add column if not exists height numeric;
+
+alter table public.health_records
+  add column if not exists bmi numeric;
 
 alter table public.nutrition_records
   add column if not exists multiplier numeric default 1;

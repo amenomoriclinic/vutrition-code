@@ -109,6 +109,12 @@ type HealthRecord = {
   id: string;
   date: string;
   weight: number | null;
+  bodyFat: number | null;
+  muscleMass: number | null;
+  boneMass: number | null;
+  metabolicAge: number | null;
+  height: number | null;
+  bmi: number | null;
   systolicBp: number | null;
   diastolicBp: number | null;
   pulse: number | null;
@@ -319,11 +325,17 @@ export default function HomePage() {
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummaryResult | null>(null);
   const [healthForm, setHealthForm] = useState({
     weight: '',
+    bodyFat: '',
+    muscleMass: '',
+    boneMass: '',
+    metabolicAge: '',
+    height: '',
     systolicBp: '',
     diastolicBp: '',
     pulse: '',
   });
   const [healthToday, setHealthToday] = useState<HealthRecord | null>(null);
+  const [savedHeight, setSavedHeight] = useState<number | null>(null);
   const [healthSaving, setHealthSaving] = useState(false);
   const [healthStatusMessage, setHealthStatusMessage] = useState('');
   const bulkRecordSaveResetTimer = useRef<number | null>(null);
@@ -594,11 +606,24 @@ export default function HomePage() {
     id: String(row.id),
     date: String(row.date),
     weight: row.weight === null || row.weight === undefined ? null : Number(row.weight),
+    bodyFat: row.body_fat === null || row.body_fat === undefined ? null : Number(row.body_fat),
+    muscleMass: row.muscle_mass === null || row.muscle_mass === undefined ? null : Number(row.muscle_mass),
+    boneMass: row.bone_mass === null || row.bone_mass === undefined ? null : Number(row.bone_mass),
+    metabolicAge: row.metabolic_age === null || row.metabolic_age === undefined ? null : Number(row.metabolic_age),
+    height: row.height === null || row.height === undefined ? null : Number(row.height),
+    bmi: row.bmi === null || row.bmi === undefined ? null : Number(row.bmi),
     systolicBp: row.systolic_bp === null || row.systolic_bp === undefined ? null : Number(row.systolic_bp),
     diastolicBp: row.diastolic_bp === null || row.diastolic_bp === undefined ? null : Number(row.diastolic_bp),
     pulse: row.pulse === null || row.pulse === undefined ? null : Number(row.pulse),
     createdAt: row.created_at ? String(row.created_at) : undefined,
   });
+
+  const calcBmi = (weight: number | null, heightCm: number | null) => {
+    if (weight == null || heightCm == null || heightCm <= 0) return null;
+    const m = heightCm / 100;
+    const bmi = weight / (m * m);
+    return Number.isFinite(bmi) ? round1(bmi) : null;
+  };
 
   const loadHealthRecords = async () => {
     if (!isSupabaseConfigured) {
@@ -612,7 +637,7 @@ export default function HomePage() {
 
     const { data, error } = await supabase
       .from('health_records')
-      .select('id,date,weight,systolic_bp,diastolic_bp,pulse,created_at')
+      .select('id,date,weight,body_fat,muscle_mass,bone_mass,metabolic_age,height,bmi,systolic_bp,diastolic_bp,pulse,created_at')
       .gte('date', periodStart)
       .lte('date', today)
       .order('date', { ascending: false })
@@ -631,16 +656,29 @@ export default function HomePage() {
       }
     });
 
+    const latestWithHeight = rows.find((row) => row.height != null);
+    setSavedHeight(latestWithHeight?.height ?? null);
+
     const todayRecord = latestByDate.get(today) || null;
     setHealthToday(todayRecord);
 
     if (todayRecord) {
       setHealthForm({
         weight: todayRecord.weight == null ? '' : String(todayRecord.weight),
+        bodyFat: todayRecord.bodyFat == null ? '' : String(todayRecord.bodyFat),
+        muscleMass: todayRecord.muscleMass == null ? '' : String(todayRecord.muscleMass),
+        boneMass: todayRecord.boneMass == null ? '' : String(todayRecord.boneMass),
+        metabolicAge: todayRecord.metabolicAge == null ? '' : String(todayRecord.metabolicAge),
+        height: todayRecord.height == null ? (latestWithHeight?.height == null ? '' : String(latestWithHeight.height)) : String(todayRecord.height),
         systolicBp: todayRecord.systolicBp == null ? '' : String(todayRecord.systolicBp),
         diastolicBp: todayRecord.diastolicBp == null ? '' : String(todayRecord.diastolicBp),
         pulse: todayRecord.pulse == null ? '' : String(todayRecord.pulse),
       });
+    } else {
+      setHealthForm((prev) => ({
+        ...prev,
+        height: latestWithHeight?.height == null ? prev.height : String(latestWithHeight.height),
+      }));
     }
   };
 
@@ -651,12 +689,24 @@ export default function HomePage() {
     }
 
     const weight = parseNullableNumber(healthForm.weight);
+    const bodyFat = parseNullableNumber(healthForm.bodyFat);
+    const muscleMass = parseNullableNumber(healthForm.muscleMass);
+    const boneMass = parseNullableNumber(healthForm.boneMass);
+    const metabolicAge = parseNullableNumber(healthForm.metabolicAge);
     const systolicBp = parseNullableNumber(healthForm.systolicBp);
     const diastolicBp = parseNullableNumber(healthForm.diastolicBp);
     const pulse = parseNullableNumber(healthForm.pulse);
+    const heightInput = parseNullableNumber(healthForm.height);
+    const height = savedHeight ?? heightInput;
+    const bmi = calcBmi(weight, height);
 
-    if (weight == null && systolicBp == null && diastolicBp == null && pulse == null) {
-      setHealthStatusMessage('体重・血圧・脈拍のいずれかを入力してください。');
+    if (savedHeight == null && height == null) {
+      setHealthStatusMessage('初回は身長(cm)を入力してください。');
+      return;
+    }
+
+    if (weight == null && bodyFat == null && muscleMass == null && boneMass == null && metabolicAge == null && systolicBp == null && diastolicBp == null && pulse == null) {
+      setHealthStatusMessage('体重・血圧・脈拍・体組成のいずれかを入力してください。');
       return;
     }
 
@@ -679,6 +729,12 @@ export default function HomePage() {
       const payload = {
         date: today,
         weight,
+        body_fat: bodyFat,
+        muscle_mass: muscleMass,
+        bone_mass: boneMass,
+        metabolic_age: metabolicAge == null ? null : Math.round(metabolicAge),
+        height,
+        bmi,
         systolic_bp: systolicBp,
         diastolic_bp: diastolicBp,
         pulse,
@@ -693,6 +749,9 @@ export default function HomePage() {
       }
 
       setHealthStatusMessage('記録しました');
+      if (height != null) {
+        setSavedHeight(height);
+      }
       await loadHealthRecords();
     } catch (error) {
       console.error('[health] save failed', error);
@@ -1885,6 +1944,17 @@ export default function HomePage() {
         <h2 className="section-title">毎日の健康記録</h2>
         <div className="health-inline-grid">
           <label className="health-inline-field">
+            身長cm
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={savedHeight != null ? String(savedHeight) : healthForm.height}
+              disabled={savedHeight != null}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, height: e.target.value }))}
+            />
+          </label>
+          <label className="health-inline-field">
             体重kg
             <input
               type="number"
@@ -1892,6 +1962,19 @@ export default function HomePage() {
               min="0"
               value={healthForm.weight}
               onChange={(e) => setHealthForm((prev) => ({ ...prev, weight: e.target.value }))}
+            />
+          </label>
+          <label className="health-inline-field">
+            BMI
+            <input
+              type="text"
+              value={(() => {
+                const weight = parseNullableNumber(healthForm.weight);
+                const height = savedHeight ?? parseNullableNumber(healthForm.height);
+                const bmi = calcBmi(weight, height);
+                return bmi == null ? '' : bmi.toFixed(1);
+              })()}
+              readOnly
             />
           </label>
           <label className="health-inline-field">
@@ -1922,6 +2005,46 @@ export default function HomePage() {
               min="0"
               value={healthForm.diastolicBp}
               onChange={(e) => setHealthForm((prev) => ({ ...prev, diastolicBp: e.target.value }))}
+            />
+          </label>
+          <label className="health-inline-field">
+            体脂肪率%
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={healthForm.bodyFat}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, bodyFat: e.target.value }))}
+            />
+          </label>
+          <label className="health-inline-field">
+            筋肉量kg
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={healthForm.muscleMass}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, muscleMass: e.target.value }))}
+            />
+          </label>
+          <label className="health-inline-field">
+            推定骨量kg
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={healthForm.boneMass}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, boneMass: e.target.value }))}
+            />
+          </label>
+          <label className="health-inline-field">
+            代謝年齢
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={healthForm.metabolicAge}
+              onChange={(e) => setHealthForm((prev) => ({ ...prev, metabolicAge: e.target.value }))}
             />
           </label>
         </div>
