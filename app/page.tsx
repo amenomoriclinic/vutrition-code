@@ -280,6 +280,30 @@ const defaultFavorites: FavoriteFood[] = [
     phosphorus: 43,
     phosphorusAbsorptionRate: 0.5,
   },
+  {
+    id: 'beer-350ml',
+    name: 'ビール 350ml缶',
+    amountText: '350ml缶',
+    calories: 140,
+    protein: 1.1,
+    fat: 0,
+    carbs: 11,
+    salt: 0,
+    phosphorus: 60,
+    phosphorusAbsorptionRate: 0.5,
+  },
+  {
+    id: 'sake-1go-180ml',
+    name: '日本酒 1合（180ml）',
+    amountText: '1合（180ml）',
+    calories: 185,
+    protein: 0.7,
+    fat: 0,
+    carbs: 8.8,
+    salt: 0,
+    phosphorus: 30,
+    phosphorusAbsorptionRate: 0.5,
+  },
 ];
 
 const defaultFavoriteById = new Map(defaultFavorites.map((item) => [item.id, item]));
