@@ -440,39 +440,37 @@ export default function HomePage() {
     const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
     const savedProfile = localStorage.getItem(STORAGE_PROFILE);
 
+    // The code-defined presets are always the source of truth so newly added
+    // presets (e.g. beer / sake) and updated values show up on every device.
+    // Stale localStorage snapshots are ignored for presets; only favorites the
+    // user added themselves (ids that are not presets) are restored.
+    let customFavorites: FavoriteFood[] = [];
     if (savedFavorites) {
       try {
         const parsed = JSON.parse(savedFavorites);
         if (Array.isArray(parsed)) {
-          const normalized = parsed
+          customFavorites = parsed
             .filter(isValidFavorite)
-            .map((f) => {
-              const id = String(f.id);
-              const preset = defaultFavoriteById.get(id);
-              return {
-                id,
-                name: String(f.name),
-                amountText: String(f.amountText || '1単位'),
-                calories: Number(f.calories) || 0,
-                protein: Number(f.protein) || 0,
-                fat: Number(f.fat) || 0,
-                carbs: Number(f.carbs) || 0,
-                salt: Number(f.salt) || 0,
-                phosphorus: pickPhosphorusValue(f) || preset?.phosphorus || 0,
-                phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(f, preset?.phosphorusAbsorptionRate || 0.5),
-              };
-            })
+            .filter((f) => !defaultFavoriteById.has(String(f.id)))
+            .map((f) => ({
+              id: String(f.id),
+              name: String(f.name),
+              amountText: String(f.amountText || '1単位'),
+              calories: Number(f.calories) || 0,
+              protein: Number(f.protein) || 0,
+              fat: Number(f.fat) || 0,
+              carbs: Number(f.carbs) || 0,
+              salt: Number(f.salt) || 0,
+              phosphorus: pickPhosphorusValue(f) || 0,
+              phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(f, 0.5),
+            }))
             .filter((f) => !isLegacyInoras120(f));
-          setFavorites(normalized);
-        } else {
-          setFavorites(defaultFavorites);
         }
       } catch {
-        setFavorites(defaultFavorites);
+        customFavorites = [];
       }
-    } else {
-      setFavorites(defaultFavorites);
     }
+    setFavorites([...defaultFavorites, ...customFavorites]);
 
     if (savedProfile) {
       try {
