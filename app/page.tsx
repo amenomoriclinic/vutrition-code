@@ -1150,11 +1150,9 @@ export default function HomePage() {
         if (result.estimate.mode === 'label') {
           const selectedBaseAmount = Math.max(0.1, Number(item.labelBaseAmount) || 100);
           const selectedBaseUnit = item.labelBaseUnit;
-          const intakeAmount = Math.max(0.1, Number(item.actualAmount) || selectedBaseAmount);
-          const intakeUnit = item.actualUnit;
           estimateResponse = {
             name: result.estimate.name || '不明な食品',
-            amountText: `${intakeAmount}${intakeUnit}`,
+            amountText: `${selectedBaseAmount}${selectedBaseUnit}あたり`,
             calories: Number(result.estimate.calories) || 0,
             protein: Number(result.estimate.protein) || 0,
             fat: Number(result.estimate.fat) || 0,
@@ -1162,7 +1160,7 @@ export default function HomePage() {
             salt: Number(result.estimate.salt) || 0,
             phosphorus: pickPhosphorusValue(result.estimate),
             phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(result.estimate, 0.85),
-            description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示。実際の入力量 ${intakeAmount}${intakeUnit} を倍率として適用)`,
+            description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示。実際に食べた量は記録一覧の倍率欄で調整してください。例: ${selectedBaseUnit === 'g' || selectedBaseUnit === 'ml' ? `250${selectedBaseUnit}なら倍率2.5` : '3個なら倍率3'})`,
             imageUrl: item.previewUrl,
           };
         } else {
@@ -1186,7 +1184,7 @@ export default function HomePage() {
           tempId: item.id,
           fileName: item.fileName,
           quantity: item.quantity,
-          multiplier: item.mode === 'label' ? Math.max(0.1, Number(item.actualAmount) || 1) : item.multiplier,
+          multiplier: item.mode === 'label' ? 1 : item.multiplier,
           baseCalories: estimateResponse.calories,
           baseProtein: estimateResponse.protein,
           baseFat: estimateResponse.fat,
@@ -1791,7 +1789,7 @@ export default function HomePage() {
               <div key={item.id} className="pending-row">
                 <div className="pending-main">
                   <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
-                  <small>{item.mode === 'label' ? `栄養ラベル ${labelDisplayUnitOptions[item.labelDisplayUnit].label} / 実際 ${item.actualAmount}${item.actualUnit}` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
+                  <small>{item.mode === 'label' ? `栄養ラベル ${labelDisplayUnitOptions[item.labelDisplayUnit].label}（食べた量は記録一覧の倍率で調整）` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
                 </div>
               </div>
             ))}
