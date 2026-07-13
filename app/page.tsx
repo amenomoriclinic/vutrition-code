@@ -381,9 +381,40 @@ export default function HomePage() {
   });
   const [healthToday, setHealthToday] = useState<HealthRecord | null>(null);
   const [savedHeight, setSavedHeight] = useState<number | null>(null);
-  const [healthSaving, setHealthSaving] = useState(false);
   const [healthStatusMessage, setHealthStatusMessage] = useState('');
   const bulkRecordSaveResetTimer = useRef<number | null>(null);
+
+  // Generic save/record button feedback: idle → saving → success/error → idle.
+  // Also prevents double submission (rapid double taps) via a synchronous ref guard.
+  type SaveState = 'idle' | 'saving' | 'success' | 'error';
+  const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
+  const savingKeysRef = useRef<Set<string>>(new Set());
+  const saveResetTimers = useRef<Record<string, number>>({});
+
+  const runSave = async (key: string, task: () => Promise<boolean>) => {
+    // Synchronous guard: ignore a second tap while the first save is in flight.
+    if (savingKeysRef.current.has(key)) return;
+    savingKeysRef.current.add(key);
+    if (saveResetTimers.current[key]) {
+      window.clearTimeout(saveResetTimers.current[key]);
+      delete saveResetTimers.current[key];
+    }
+    setSaveStates((prev) => ({ ...prev, [key]: 'saving' }));
+    let ok = false;
+    try {
+      ok = await task();
+    } catch (e) {
+      console.error(e);
+      ok = false;
+    } finally {
+      savingKeysRef.current.delete(key);
+    }
+    setSaveStates((prev) => ({ ...prev, [key]: ok ? 'success' : 'error' }));
+    saveResetTimers.current[key] = window.setTimeout(() => {
+      setSaveStates((prev) => ({ ...prev, [key]: 'idle' }));
+      delete saveResetTimers.current[key];
+    }, 2000);
+  };
 
   const resetBulkRecordSaveStateAfterDelay = () => {
     if (bulkRecordSaveResetTimer.current) {
@@ -588,6 +619,16 @@ export default function HomePage() {
     );
   }, [filteredRecords]);
 
+  const filteredExerciseRecords = useMemo(
+    () => filteredRecords.filter((record) => isExerciseRecord(record)),
+    [filteredRecords]
+  );
+
+  const filteredIntakeRecords = useMemo(
+    () => filteredRecords.filter((record) => !isExerciseRecord(record)),
+    [filteredRecords]
+  );
+
   const recommended = useMemo(() => getDRI(profile), [profile]);
 
   const recommendedFatGrams = useMemo(() => {
@@ -737,10 +778,10 @@ export default function HomePage() {
     }
   };
 
-  const saveDailyHealthRecord = async () => {
+  const saveDailyHealthRecord = async (): Promise<boolean> => {
     if (!isSupabaseConfigured) {
       setHealthStatusMessage('Supabase が未設定のため保存できません。');
-      return;
+      return false;
     }
 
     const weight = parseNullableNumber(healthForm.weight);
@@ -754,15 +795,14 @@ export default function HomePage() {
 
     if (savedHeight == null && height == null) {
       setHealthStatusMessage('初回は身長(cm)を入力してください。');
-      return;
+      return false;
     }
 
     if (weight == null && bodyFat == null && systolicBp == null && diastolicBp == null && pulse == null) {
       setHealthStatusMessage('体重・体脂肪率・血圧・脈拍のいずれかを入力してください。');
-      return;
+      return false;
     }
 
-    setHealthSaving(true);
     setHealthStatusMessage('');
 
     try {
@@ -803,11 +843,11 @@ export default function HomePage() {
         writeStoredHeight(height);
       }
       await loadHealthRecords();
+      return true;
     } catch (error) {
       console.error('[health] save failed', error);
       setHealthStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
-    } finally {
-      setHealthSaving(false);
+      return false;
     }
   };
 
@@ -1252,13 +1292,12 @@ export default function HomePage() {
     removePendingFood(tempId);
   };
 
-  const saveAllEstimates = async () => {
+  const saveAllEstimates = async (): Promise<boolean> => {
     if (estimates.length === 0) {
       setStatusMessage('保存する推定結果がありません。');
-      return;
+      return false;
     }
 
-    setLoading(true);
     try {
       // Keep keys aligned with nutrition_records snake_case columns.
       const inserts: NutritionRecordInsert[] = estimates.map((target) => ({
@@ -1279,7 +1318,7 @@ export default function HomePage() {
 
       if (!isSupabaseConfigured) {
         setStatusMessage('Supabase が未設定です。保存できません。');
-        return;
+        return false;
       }
 
       const { data, error } = await insertNutritionRecordsWithFallback(inserts);
@@ -1287,6 +1326,7 @@ export default function HomePage() {
       if (error) {
         console.error('Supabase insert error', error);
         setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
+        return false;
       } else if (data) {
         const created = data.map((r: any) => ({
           id: r.id,
@@ -1316,13 +1356,35 @@ export default function HomePage() {
           return [];
         });
         setStatusMessage(`${created.length}件を保存しました。`);
+        return true;
       }
+      return false;
     } catch (e) {
       console.error(e);
       setStatusMessage('保存中にエラーが発生しました。');
-    } finally {
-      setLoading(false);
+      return false;
     }
+  };
+
+  // Exercise records always append (never overwrite): each save inserts a new row.
+  const saveExerciseRecord = async (insert: NutritionRecordInsert): Promise<boolean> => {
+    if (!isSupabaseConfigured) {
+      setStatusMessage('Supabase 未設定で保存できません。');
+      return false;
+    }
+    const { data, error } = await insertNutritionRecordsWithFallback([insert]);
+    if (error) {
+      console.error(error);
+      setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
+      return false;
+    }
+    if (data && data[0]) {
+      const record = mapNutritionRecord(data[0], { name: insert.name, calories: insert.calories, protein: insert.protein, fat: insert.fat, carbs: insert.carbs, salt: insert.salt, multiplier: insert.multiplier, source: 'exercise' });
+      setRecords((prev) => [record, ...prev]);
+      setStatusMessage(`${insert.name} を記録しました。`);
+      return true;
+    }
+    return false;
   };
 
   const addFavoriteRecord = async (favorite: FavoriteFood) => {
@@ -1868,9 +1930,19 @@ export default function HomePage() {
               </div>
             ))}
           </div>
-          <button className="button-primary" type="button" onClick={saveAllEstimates} disabled={loading}>
-            {loading ? '保存中...' : '保存'}
-          </button>
+          {(() => {
+            const st = saveStates['meal'] ?? 'idle';
+            return (
+              <button
+                className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                type="button"
+                onClick={() => { void runSave('meal', saveAllEstimates); }}
+                disabled={st === 'saving'}
+              >
+                {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : '保存する'}
+              </button>
+            );
+          })()}
         </div>
       ) : null}
 
@@ -1882,38 +1954,54 @@ export default function HomePage() {
           <button type="button" onClick={() => setExerciseTab('met')} style={{padding:8, borderRadius:6, background: exerciseTab==='met' ? '#0b74de' : '#eee', color: exerciseTab==='met' ? '#fff' : '#000'}}>筋トレ</button>
         </div>
         <div>
-          {exerciseTab === 'run' && (
+          {exerciseTab === 'run' && (() => {
+            const st = saveStates['exercise-run'] ?? 'idle';
+            return (
             <div style={{display:'flex', gap:8, alignItems:'center'}}>
               <input id="run-km" type="number" step="0.1" min="0" defaultValue={0} style={{width:120}} />
-              <button className="button-secondary" onClick={async () => {
-                const el = document.getElementById('run-km') as HTMLInputElement | null;
-                const km = el ? Number(el.value) : 0;
-                if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
-                const caloriesBurned = Math.round(profile.weight * km * 1.036);
-                const insert: NutritionRecordInsert = { name: `ランニング ${km} km`, amount_text: null, calories: caloriesBurned, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
-                if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-                const { data, error } = await insertNutritionRecordsWithFallback([insert]);
-                if (error) { console.error(error); setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`); return; }
-                if (data && data[0]) { const record = mapNutritionRecord(data[0], { name: insert.name, calories: insert.calories, protein: insert.protein, fat: insert.fat, carbs: insert.carbs, salt: insert.salt, multiplier: insert.multiplier, source: 'exercise' }); setRecords((prev) => [record, ...prev]); setStatusMessage('ランニング記録を保存しました。'); }
-              }}>保存</button>
+              <button
+                type="button"
+                className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                disabled={st === 'saving'}
+                onClick={() => {
+                  const el = document.getElementById('run-km') as HTMLInputElement | null;
+                  const km = el ? Number(el.value) : 0;
+                  if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
+                  const caloriesBurned = Math.round(profile.weight * km * 1.036);
+                  const insert: NutritionRecordInsert = { name: `ランニング ${km} km`, amount_text: null, calories: caloriesBurned, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
+                  void runSave('exercise-run', () => saveExerciseRecord(insert));
+                }}
+              >
+                {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
+              </button>
             </div>
-          )}
-          {exerciseTab === 'manual' && (
+            );
+          })()}
+          {exerciseTab === 'manual' && (() => {
+            const st = saveStates['exercise-manual'] ?? 'idle';
+            return (
             <div style={{display:'flex', gap:8, alignItems:'center'}}>
               <input id="manual-cal" type="number" step="1" min="0" defaultValue={0} style={{width:120}} />
-              <button className="button-secondary" onClick={async () => {
-                const el = document.getElementById('manual-cal') as HTMLInputElement | null;
-                const kcal = el ? Math.round(Number(el.value)) : 0;
-                if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
-                const insert: NutritionRecordInsert = { name: `運動（手動）`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
-                if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-                const { data, error } = await insertNutritionRecordsWithFallback([insert]);
-                if (error) { console.error(error); setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`); return; }
-                if (data && data[0]) { const record = mapNutritionRecord(data[0], { name: insert.name, calories: insert.calories, protein: insert.protein, fat: insert.fat, carbs: insert.carbs, salt: insert.salt, multiplier: insert.multiplier, source: 'exercise' }); setRecords((prev) => [record, ...prev]); setStatusMessage('運動記録を保存しました。'); }
-              }}>保存</button>
+              <button
+                type="button"
+                className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                disabled={st === 'saving'}
+                onClick={() => {
+                  const el = document.getElementById('manual-cal') as HTMLInputElement | null;
+                  const kcal = el ? Math.round(Number(el.value)) : 0;
+                  if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
+                  const insert: NutritionRecordInsert = { name: `運動（手動）`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
+                  void runSave('exercise-manual', () => saveExerciseRecord(insert));
+                }}
+              >
+                {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
+              </button>
             </div>
-          )}
-          {exerciseTab === 'met' && (
+            );
+          })()}
+          {exerciseTab === 'met' && (() => {
+            const st = saveStates['exercise-met'] ?? 'idle';
+            return (
             <div style={{display:'flex', gap:8, alignItems:'center'}}>
               <select id="met-select">
                 <option value="3.5">軽め - MET 3.5</option>
@@ -1921,22 +2009,27 @@ export default function HomePage() {
                 <option value="7.0">高強度 - MET 7.0</option>
               </select>
               <input id="met-min" type="number" defaultValue={30} min={1} style={{width:80}} />
-              <button className="button-secondary" onClick={async () => {
-                const metEl = document.getElementById('met-select') as HTMLSelectElement | null;
-                const minEl = document.getElementById('met-min') as HTMLInputElement | null;
-                const met = metEl ? Number(metEl.value) : 0;
-                const min = minEl ? Number(minEl.value) : 0;
-                if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
-                const hours = min / 60;
-                const kcal = Math.round(met * profile.weight * hours);
-                const insert: NutritionRecordInsert = { name: `筋トレ ${min}分`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: `MET ${met}`, image_url: null };
-                if (!isSupabaseConfigured) { setStatusMessage('Supabase 未設定で保存できません。'); return; }
-                const { data, error } = await insertNutritionRecordsWithFallback([insert]);
-                if (error) { console.error(error); setStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`); return; }
-                if (data && data[0]) { const record = mapNutritionRecord(data[0], { name: insert.name, calories: insert.calories, protein: insert.protein, fat: insert.fat, carbs: insert.carbs, salt: insert.salt, multiplier: insert.multiplier, source: 'exercise' }); setRecords((prev) => [record, ...prev]); setStatusMessage('筋トレ記録を保存しました。'); }
-              }}>保存</button>
+              <button
+                type="button"
+                className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                disabled={st === 'saving'}
+                onClick={() => {
+                  const metEl = document.getElementById('met-select') as HTMLSelectElement | null;
+                  const minEl = document.getElementById('met-min') as HTMLInputElement | null;
+                  const met = metEl ? Number(metEl.value) : 0;
+                  const min = minEl ? Number(minEl.value) : 0;
+                  if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
+                  const hours = min / 60;
+                  const kcal = Math.round(met * profile.weight * hours);
+                  const insert: NutritionRecordInsert = { name: `筋トレ ${min}分`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: `MET ${met}`, image_url: null };
+                  void runSave('exercise-met', () => saveExerciseRecord(insert));
+                }}
+              >
+                {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
+              </button>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 
@@ -2018,9 +2111,19 @@ export default function HomePage() {
             />
           </label>
         </div>
-        <button className="button-primary health-save-button" type="button" disabled={healthSaving} onClick={() => { void saveDailyHealthRecord(); }}>
-          {healthSaving ? '保存中...' : '記録する'}
-        </button>
+        {(() => {
+          const st = saveStates['health'] ?? 'idle';
+          return (
+            <button
+              className={`button-primary health-save-button save-feedback-button save-feedback-button-${st}`}
+              type="button"
+              disabled={st === 'saving'}
+              onClick={() => { void runSave('health', saveDailyHealthRecord); }}
+            >
+              {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
+            </button>
+          );
+        })()}
         {healthStatusMessage ? <p><small>{healthStatusMessage}</small></p> : null}
       </div>
 
@@ -2190,6 +2293,29 @@ export default function HomePage() {
       </div>
 
       <div className="page-card">
+        <h2 className="section-title">運動記録の一覧</h2>
+        {filteredExerciseRecords.length === 0 ? (
+          <p>この日の運動記録はまだありません。</p>
+        ) : (
+          <div className="field-grid">
+            {filteredExerciseRecords.map((record) => (
+              <div key={record.id} className="record-row">
+                <div className="record-head">
+                  <div className="record-main">
+                    <strong className="record-name">{record.name}</strong>
+                    <span className="record-kcal">-{record.calories.toFixed(0)} kcal</span>
+                  </div>
+                  <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="page-card">
         <h2 className="section-title">記録一覧</h2>
         <div className="record-actions">
           <button
@@ -2209,11 +2335,11 @@ export default function HomePage() {
                   : '全て保存'}
           </button>
         </div>
-        {filteredRecords.length === 0 ? (
+        {filteredIntakeRecords.length === 0 ? (
           <p>この日の記録はまだありません。</p>
         ) : (
           <div className="field-grid">
-            {filteredRecords.map((record) => (
+            {filteredIntakeRecords.map((record) => (
               <div key={record.id} className="record-row">
                 <div className="record-head">
                   <div className="record-main">

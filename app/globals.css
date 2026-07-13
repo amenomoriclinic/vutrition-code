@@ -514,6 +514,43 @@ small {
   color: #ffffff;
 }
 
+/* Prominent save/record button with tap feedback (green ✓ on success). */
+.save-feedback-button {
+  min-height: 48px;
+  padding: 14px 22px;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 12px rgba(15, 118, 110, 0.28);
+  transition: background-color 160ms ease, color 160ms ease, transform 120ms ease, box-shadow 160ms ease;
+}
+
+.save-feedback-button:active {
+  transform: translateY(1px);
+}
+
+.save-feedback-button:disabled {
+  cursor: default;
+}
+
+.save-feedback-button.save-feedback-button-saving {
+  background: #cbd5e1;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+.save-feedback-button.save-feedback-button-success {
+  background: #16a34a;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.35);
+}
+
+.save-feedback-button.save-feedback-button-error {
+  background: #dc2626;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
 .record-main {
   min-width: 0;
   display: flex;
