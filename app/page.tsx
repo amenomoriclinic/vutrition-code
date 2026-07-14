@@ -397,8 +397,9 @@ export default function HomePage() {
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
-  const [addFoodFlash, setAddFoodFlash] = useState(false);
-  const addFoodFlashTimer = useRef<number | null>(null);
+  const [addFoodState, setAddFoodState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [addFoodCount, setAddFoodCount] = useState(0);
+  const addFoodResetTimer = useRef<number | null>(null);
   const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
   const [bulkRecordSaveState, setBulkRecordSaveState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [bulkRecordSaveCount, setBulkRecordSaveCount] = useState(0);
@@ -1109,73 +1110,103 @@ export default function HomePage() {
     }
   };
 
-  const flashAddFood = () => {
-    if (addFoodFlashTimer.current) {
-      window.clearTimeout(addFoodFlashTimer.current);
+  const resetAddFoodStateAfterDelay = () => {
+    if (addFoodResetTimer.current) {
+      window.clearTimeout(addFoodResetTimer.current);
     }
-    setAddFoodFlash(true);
-    addFoodFlashTimer.current = window.setTimeout(() => {
-      setAddFoodFlash(false);
-      addFoodFlashTimer.current = null;
-    }, 1400);
+    addFoodResetTimer.current = window.setTimeout(() => {
+      setAddFoodState('idle');
+      setAddFoodCount(0);
+      addFoodResetTimer.current = null;
+    }, 2000);
   };
 
-  const addPendingFood = () => {
+  const failAddFood = (message: string) => {
+    setStatusMessage(message);
+    setAddFoodState('error');
+    setAddFoodCount(0);
+    resetAddFoodStateAfterDelay();
+  };
+
+  const addPendingFood = async () => {
+    if (addFoodState === 'saving') {
+      return;
+    }
+
     if (scanMode === 'text') {
       if (!textFoodName.trim()) {
-        setStatusMessage('食品名・料理名を入力してください。');
+        failAddFood('食品名・料理名を入力してください。');
         return;
       }
-      const queued: PendingFood = {
-        id: crypto.randomUUID(),
-        mode: 'text',
-        fileName: textFoodName.trim(),
-        foodName: textFoodName.trim(),
-        foodAmount: textFoodAmount.trim(),
-        description,
-        consumedGrams,
-        labelDisplayUnit,
-        labelBaseAmount: labelDisplayUnitOptions[labelDisplayUnit].baseAmount,
-        labelBaseUnit: labelDisplayUnitOptions[labelDisplayUnit].baseUnit,
-        actualAmount,
-        actualUnit,
-        quantity: 1,
-        multiplier: 1,
-      };
-      setPendingFoods((prev) => [queued, ...prev]);
-      setTextFoodName('');
-      setTextFoodAmount('');
-      setStatusMessage('食品をリストに追加しました。');
-      flashAddFood();
+    } else if (photoFiles.length === 0) {
+      failAddFood('写真を1枚以上選択してください。');
       return;
     }
 
-    if (photoFiles.length === 0) {
-      setStatusMessage('写真を1枚以上選択してください。');
-      return;
+    if (addFoodResetTimer.current) {
+      window.clearTimeout(addFoodResetTimer.current);
+      addFoodResetTimer.current = null;
     }
+    setAddFoodState('saving');
+    setAddFoodCount(0);
 
-    const queued = photoFiles.map((file) => ({
-      id: crypto.randomUUID(),
-      mode: scanMode,
-      file,
-      fileName: file.name,
-      previewUrl: URL.createObjectURL(file),
-      description,
-      consumedGrams,
-      labelDisplayUnit,
-      labelBaseAmount: labelDisplayUnitOptions[labelDisplayUnit].baseAmount,
-      labelBaseUnit: labelDisplayUnitOptions[labelDisplayUnit].baseUnit,
-      actualAmount,
-      actualUnit,
-      quantity: 1,
-      multiplier: scanMode === 'label' ? Math.max(0.1, Number(actualAmount) || 1) : 1,
-    } as PendingFood));
+    // Brief pause so the "保存中..." loading state is visible for this instant local add.
+    await new Promise((resolve) => window.setTimeout(resolve, 450));
 
-    setPendingFoods((prev) => [...queued, ...prev]);
-    setPhotoFiles([]);
-    setStatusMessage(`${queued.length}件の食品をリストに追加しました。`);
-    flashAddFood();
+    try {
+      let addedCount = 0;
+
+      if (scanMode === 'text') {
+        const queued: PendingFood = {
+          id: crypto.randomUUID(),
+          mode: 'text',
+          fileName: textFoodName.trim(),
+          foodName: textFoodName.trim(),
+          foodAmount: textFoodAmount.trim(),
+          description,
+          consumedGrams,
+          labelDisplayUnit,
+          labelBaseAmount: labelDisplayUnitOptions[labelDisplayUnit].baseAmount,
+          labelBaseUnit: labelDisplayUnitOptions[labelDisplayUnit].baseUnit,
+          actualAmount,
+          actualUnit,
+          quantity: 1,
+          multiplier: 1,
+        };
+        setPendingFoods((prev) => [queued, ...prev]);
+        setTextFoodName('');
+        setTextFoodAmount('');
+        addedCount = 1;
+      } else {
+        const queued = photoFiles.map((file) => ({
+          id: crypto.randomUUID(),
+          mode: scanMode,
+          file,
+          fileName: file.name,
+          previewUrl: URL.createObjectURL(file),
+          description,
+          consumedGrams,
+          labelDisplayUnit,
+          labelBaseAmount: labelDisplayUnitOptions[labelDisplayUnit].baseAmount,
+          labelBaseUnit: labelDisplayUnitOptions[labelDisplayUnit].baseUnit,
+          actualAmount,
+          actualUnit,
+          quantity: 1,
+          multiplier: scanMode === 'label' ? Math.max(0.1, Number(actualAmount) || 1) : 1,
+        } as PendingFood));
+
+        setPendingFoods((prev) => [...queued, ...prev]);
+        setPhotoFiles([]);
+        addedCount = queued.length;
+      }
+
+      setStatusMessage(`${addedCount}件の食品をリストに追加しました。`);
+      setAddFoodCount(addedCount);
+      setAddFoodState('success');
+      resetAddFoodStateAfterDelay();
+    } catch {
+      failAddFood('保存に失敗しました。');
+    }
   };
 
   const removePendingFood = (id: string) => {
@@ -1875,11 +1906,20 @@ export default function HomePage() {
           </label>
 
           <button
-            className={`button-secondary add-food-button${addFoodFlash ? ' add-food-button-success' : ''}`}
+            className={`button-secondary add-food-button add-food-button-${addFoodState}`}
             type="button"
-            onClick={addPendingFood}
+            disabled={addFoodState === 'saving'}
+            onClick={() => {
+              void addPendingFood();
+            }}
           >
-            {addFoodFlash ? '✓ 追加しました' : '食品を追加'}
+            {addFoodState === 'saving'
+              ? '保存中...'
+              : addFoodState === 'success'
+                ? `✓ ${addFoodCount}件を追加しました`
+                : addFoodState === 'error'
+                  ? '保存に失敗しました'
+                  : '食品を追加'}
           </button>
         </div>
       </div>

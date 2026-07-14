@@ -508,13 +508,23 @@ small {
   color: #475569;
 }
 
-/* "食品を追加" tap feedback (briefly turns green with ✓ 追加しました). */
+/* "食品を追加" tap feedback: saving (grey) → success (green ✓) → error (red). */
 .add-food-button {
   transition: background-color 160ms ease, color 160ms ease;
 }
 
-.add-food-button-success {
+.add-food-button.add-food-button-saving {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.add-food-button.add-food-button-success {
   background: #16a34a;
+  color: #ffffff;
+}
+
+.add-food-button.add-food-button-error {
+  background: #dc2626;
   color: #ffffff;
 }
 
