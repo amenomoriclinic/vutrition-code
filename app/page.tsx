@@ -311,6 +311,18 @@ const defaultFavorites: FavoriteFood[] = [
     phosphorus: 30,
     phosphorusAbsorptionRate: 0.5,
   },
+  {
+    id: 'milk-40ml',
+    name: '牛乳 40ml',
+    amountText: '40ml',
+    calories: 24,
+    protein: 1.3,
+    fat: 1.5,
+    carbs: 1.9,
+    salt: 0.04,
+    phosphorus: 37,
+    phosphorusAbsorptionRate: 0.5,
+  },
 ];
 
 const defaultFavoriteById = new Map(defaultFavorites.map((item) => [item.id, item]));
