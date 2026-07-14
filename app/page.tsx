@@ -2422,7 +2422,7 @@ export default function HomePage() {
             {bulkRecordSaveState === 'saving'
               ? '保存中...'
               : bulkRecordSaveState === 'success'
-                ? `✓ ${bulkRecordSaveCount}件保存しました`
+                ? `✓ ${bulkRecordSaveCount}件の倍率を保存しました`
                 : bulkRecordSaveState === 'error'
                   ? '保存に失敗しました'
                   : '全て保存'}
