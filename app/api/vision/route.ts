@@ -28,6 +28,16 @@ export async function POST(request: Request) {
         ? '1食分あたり'
         : '100gあたり';
 
+  // Coerce Claude's detected unit (本/袋/枚/人前 ...) into one of our known units.
+  const normalizeLabelUnit = (value: unknown): string => {
+    const raw = String(value ?? '').trim().toLowerCase();
+    if (raw === 'g' || raw.includes('グラム')) return 'g';
+    if (raw === 'ml' || raw.includes('ミリ')) return 'ml';
+    if (/個|本|袋|枚|杯|粒|切れ|piece|pcs?/.test(raw)) return '個';
+    if (/食分|人前|食|serving|meal/.test(raw)) return '食分';
+    return 'g';
+  };
+
   const inferAbsorptionRate = (name: string, currentMode: string) => {
     if (currentMode === 'label') return 0.85;
     const n = name.toLowerCase();
@@ -42,7 +52,7 @@ export async function POST(request: Request) {
   const prompt = mode === 'text'
     ? `次の食品名・料理名から、一般的な日本の食品データベースを参考に、おおよその栄養素を推定してJSONだけを返してください。正確な商品名でなくても、類似品や一般的な分量を使って推定してください。リン含有量(mg)と吸収率も必ず返してください。吸収率ルール: 天然食品は0.5、加工食品・経腸栄養剤は0.85。入力: 食品名/料理名="${foodName || '不明'}", 量="${foodAmount || '未指定'}", 補足="${description || 'なし'}"。\n必ず以下の形式のJSONのみ返してください:\n{"name":"食品名","amountText":"1人前","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0,"phosphorus":0,"phosphorusAbsorptionRate":0.5}`
     : mode === 'label'
-      ? `この画像には食品パッケージの栄養成分表示が写っています。次の表示単位で栄養値を読み取ってください: ${unitText}（=${labelBaseAmount}${labelBaseUnit}あたり）。実際に食べた量は ${actualAmount}${actualUnit} です。栄養値は表示単位あたりの値を返し、換算は行わないでください。リン含有量(mg)も返し、吸収率は加工食品として0.85にしてください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"${unitText}","baseAmount":${labelBaseAmount},"baseUnit":"${labelBaseUnit}","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0,"phosphorus":0,"phosphorusAbsorptionRate":0.85}`
+      ? `この画像には食品パッケージの栄養成分表示が写っています。まず、栄養成分表示に記載されている「表示単位（基準量）」をラベルからそのまま読み取ってください。表示単位の例: 「100gあたり」「1個あたり」「1本あたり」「1袋あたり」「100mlあたり」「1食分あたり」など。読み取った表示単位を次の3つで返してください: amountText(例:"100gあたり")、baseAmount(数値、例:100 や 1)、baseUnit("g" | "ml" | "個" | "食分" のいずれか。1個/1本/1袋/1枚 は "個"、1食分/1人前 は "食分"）。栄養値はその表示単位「あたり」の値をそのまま返し、換算は行わないでください。表示単位が読み取れない場合のみ 100gあたり を用いてください。リン含有量(mg)も返し、吸収率は加工食品として0.85にしてください。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"mode":"label","name":"食品名","amountText":"100gあたり","baseAmount":100,"baseUnit":"g","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0,"phosphorus":0,"phosphorusAbsorptionRate":0.85}`
       : `画像に写っている料理について、以下をJSONで返してください。500円玉が写っていれば量の推定に使ってください。リン含有量(mg)と吸収率も返してください。吸収率ルール: 天然食品は0.5、加工食品・経腸栄養剤は0.85。追加情報: ${description || 'なし'}\n必ず以下の形式のJSONのみ返してください:\n{"name":"料理名","amountText":"推定量","calories":0,"protein":0,"fat":0,"carbs":0,"salt":0,"phosphorus":0,"phosphorusAbsorptionRate":0.5}`;
 
   const contentParts = mode === 'text'
@@ -99,9 +109,10 @@ export async function POST(request: Request) {
     if (mode === 'label') {
       parsed.mode = 'label';
       parsed.consumedGrams = consumedGrams;
-      parsed.baseAmount = Number(parsed.baseAmount) || labelBaseAmount;
-      parsed.baseUnit = String(parsed.baseUnit || labelBaseUnit);
-      parsed.amountText = String(parsed.amountText || unitText);
+      const detectedBaseAmount = Number(parsed.baseAmount);
+      parsed.baseAmount = Number.isFinite(detectedBaseAmount) && detectedBaseAmount > 0 ? detectedBaseAmount : (labelBaseAmount || 100);
+      parsed.baseUnit = normalizeLabelUnit(parsed.baseUnit || labelBaseUnit);
+      parsed.amountText = String(parsed.amountText || `${parsed.baseAmount}${parsed.baseUnit}あたり`);
       parsed.phosphorusAbsorptionRate = 0.85;
     }
     return NextResponse.json({ estimate: parsed });

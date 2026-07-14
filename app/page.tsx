@@ -29,6 +29,13 @@ type EditableEstimate = NutritionEstimate & {
   fileName: string;
   quantity: number;
   multiplier: number;
+  mode: 'food' | 'label' | 'text';
+  // Base nutrient values correspond to `baseAmount` of `baseUnit` (e.g. 100g, 1個).
+  baseAmount: number;
+  baseUnit: LabelAmountUnit;
+  // Actual eaten amount; nutrition is auto-scaled by actualAmount / baseAmount.
+  actualAmount: number;
+  actualUnit: LabelAmountUnit;
   baseCalories: number;
   baseProtein: number;
   baseFat: number;
@@ -321,6 +328,19 @@ const labelDisplayUnitOptions: Record<LabelDisplayUnit, { label: string; baseAmo
   perServing: { label: '1食分あたり', baseAmount: 1, baseUnit: '食分', defaultActualUnit: '食分' },
 };
 
+// Options offered in the "実際に食べた量" unit selector.
+const actualUnitOptions: LabelAmountUnit[] = ['g', 'ml', '個', '食分'];
+
+// Coerce a free-form unit (from Claude, e.g. "本"/"袋"/"人前") into one of our known units.
+const normalizeAmountUnit = (value: unknown): LabelAmountUnit => {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (raw === 'g' || raw.includes('グラム')) return 'g';
+  if (raw === 'ml' || raw.includes('ミリ')) return 'ml';
+  if (/個|本|袋|枚|杯|粒|切れ|piece|pcs?/.test(raw)) return '個';
+  if (/食分|人前|食|serving|meal/.test(raw)) return '食分';
+  return 'g';
+};
+
 const HEIGHT_STORAGE_KEY = 'nutrition-app-height';
 
 const readStoredHeight = (): number | null => {
@@ -365,6 +385,8 @@ export default function HomePage() {
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
+  const [addFoodFlash, setAddFoodFlash] = useState(false);
+  const addFoodFlashTimer = useRef<number | null>(null);
   const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
   const [bulkRecordSaveState, setBulkRecordSaveState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [bulkRecordSaveCount, setBulkRecordSaveCount] = useState(0);
@@ -1039,13 +1061,18 @@ export default function HomePage() {
   });
 
   const recalcEstimate = (estimate: EditableEstimate): EditableEstimate => {
-    const quantity = Math.max(0.1, Number(estimate.quantity) || 1);
-    const multiplier = Math.max(0.1, Number(estimate.multiplier) || 1);
-    const scale = quantity * multiplier;
+    // Nutrition auto-converts by the ratio of actual eaten amount to the label's base amount.
+    // e.g. 100gあたり56kcal を 250g 食べた場合 → scale 2.5 → 140kcal
+    const baseAmount = Math.max(0.0001, Number(estimate.baseAmount) || 1);
+    const rawActual = Number(estimate.actualAmount);
+    const actualAmount = Number.isFinite(rawActual) && rawActual > 0 ? rawActual : baseAmount;
+    const scale = actualAmount / baseAmount;
     return {
       ...estimate,
-      quantity,
-      multiplier,
+      baseAmount,
+      actualAmount,
+      quantity: 1,
+      multiplier: round1(scale),
       calories: round1(estimate.baseCalories * scale),
       protein: round1(estimate.baseProtein * scale),
       fat: round1(estimate.baseFat * scale),
@@ -1068,6 +1095,17 @@ export default function HomePage() {
     if (meta.baseUnit === 'g') {
       setConsumedGrams(meta.baseAmount);
     }
+  };
+
+  const flashAddFood = () => {
+    if (addFoodFlashTimer.current) {
+      window.clearTimeout(addFoodFlashTimer.current);
+    }
+    setAddFoodFlash(true);
+    addFoodFlashTimer.current = window.setTimeout(() => {
+      setAddFoodFlash(false);
+      addFoodFlashTimer.current = null;
+    }, 1400);
   };
 
   const addPendingFood = () => {
@@ -1096,6 +1134,7 @@ export default function HomePage() {
       setTextFoodName('');
       setTextFoodAmount('');
       setStatusMessage('食品をリストに追加しました。');
+      flashAddFood();
       return;
     }
 
@@ -1124,6 +1163,7 @@ export default function HomePage() {
     setPendingFoods((prev) => [...queued, ...prev]);
     setPhotoFiles([]);
     setStatusMessage(`${queued.length}件の食品をリストに追加しました。`);
+    flashAddFood();
   };
 
   const removePendingFood = (id: string) => {
@@ -1187,12 +1227,16 @@ export default function HomePage() {
         }
 
         let estimateResponse: NutritionEstimate;
+        let estBaseAmount: number;
+        let estBaseUnit: LabelAmountUnit;
         if (result.estimate.mode === 'label') {
-          const selectedBaseAmount = Math.max(0.1, Number(item.labelBaseAmount) || 100);
-          const selectedBaseUnit = item.labelBaseUnit;
+          // Claude reads the label's own display unit (100gあたり / 1個あたり / 100mlあたり ...).
+          estBaseAmount = Math.max(0.1, Number(result.estimate.baseAmount) || Number(item.labelBaseAmount) || 100);
+          estBaseUnit = normalizeAmountUnit(result.estimate.baseUnit ?? item.labelBaseUnit);
+          const detectedAmountText = String(result.estimate.amountText || `${estBaseAmount}${estBaseUnit}あたり`);
           estimateResponse = {
             name: result.estimate.name || '不明な食品',
-            amountText: `${selectedBaseAmount}${selectedBaseUnit}あたり`,
+            amountText: detectedAmountText,
             calories: Number(result.estimate.calories) || 0,
             protein: Number(result.estimate.protein) || 0,
             fat: Number(result.estimate.fat) || 0,
@@ -1200,10 +1244,13 @@ export default function HomePage() {
             salt: Number(result.estimate.salt) || 0,
             phosphorus: pickPhosphorusValue(result.estimate),
             phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(result.estimate, 0.85),
-            description: `${item.description} (${selectedBaseAmount}${selectedBaseUnit}あたりの栄養表示。実際に食べた量は記録一覧の倍率欄で調整してください。例: ${selectedBaseUnit === 'g' || selectedBaseUnit === 'ml' ? `250${selectedBaseUnit}なら倍率2.5` : '3個なら倍率3'})`,
+            description: `${item.description ? `${item.description} ` : ''}栄養表示: ${detectedAmountText}。下の「実際に食べた量」を入力すると栄養値が自動換算されます。`,
             imageUrl: item.previewUrl,
           };
         } else {
+          // Photo/text estimates already reflect the whole portion (base = 1 serving).
+          estBaseAmount = 1;
+          estBaseUnit = '食分';
           estimateResponse = {
             name: result.estimate.name || item.foodName || '不明な料理',
             amountText: result.estimate.amountText || item.foodAmount || '1品',
@@ -1223,8 +1270,14 @@ export default function HomePage() {
           ...estimateResponse,
           tempId: item.id,
           fileName: item.fileName,
-          quantity: item.quantity,
-          multiplier: item.mode === 'label' ? 1 : item.multiplier,
+          mode: item.mode,
+          quantity: 1,
+          multiplier: 1,
+          baseAmount: estBaseAmount,
+          baseUnit: estBaseUnit,
+          // Default the eaten amount to one base unit so the estimate initially shows per-unit values.
+          actualAmount: estBaseAmount,
+          actualUnit: estBaseUnit,
           baseCalories: estimateResponse.calories,
           baseProtein: estimateResponse.protein,
           baseFat: estimateResponse.fat,
@@ -1809,8 +1862,12 @@ export default function HomePage() {
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例: ガスト チーズINハンバーグ" />
           </label>
 
-          <button className="button-secondary" type="button" onClick={addPendingFood}>
-            食品を追加
+          <button
+            className={`button-secondary add-food-button${addFoodFlash ? ' add-food-button-success' : ''}`}
+            type="button"
+            onClick={addPendingFood}
+          >
+            {addFoodFlash ? '✓ 追加しました' : '食品を追加'}
           </button>
         </div>
       </div>
@@ -1851,7 +1908,7 @@ export default function HomePage() {
               <div key={item.id} className="pending-row">
                 <div className="pending-main">
                   <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
-                  <small>{item.mode === 'label' ? `栄養ラベル ${labelDisplayUnitOptions[item.labelDisplayUnit].label}（食べた量は記録一覧の倍率で調整）` : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
+                  <small>{item.mode === 'label' ? '栄養ラベル（表示単位はClaudeが自動判定 / 実際に食べた量は推定結果で調整）' : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
                 </div>
               </div>
             ))}
@@ -1922,6 +1979,30 @@ export default function HomePage() {
                       onChange={(e) => updateEstimate(estimate.tempId, { phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(e.target.value)) })}
                     />
                   </label>
+                </div>
+                <div className="estimate-actual-amount">
+                  <span className="estimate-actual-label">実際に食べた量</span>
+                  <div className="estimate-actual-controls">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={estimate.actualAmount}
+                      onChange={(e) => updateEstimate(estimate.tempId, { actualAmount: Number(e.target.value) || 0 })}
+                    />
+                    <select
+                      value={estimate.actualUnit}
+                      onChange={(e) => updateEstimate(estimate.tempId, { actualUnit: e.target.value as LabelAmountUnit })}
+                    >
+                      {actualUnitOptions.map((u) => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <small className="estimate-actual-hint">
+                    上の栄養値「{estimate.baseAmount}{estimate.baseUnit}あたり」を基準に自動換算（現在 ×{estimate.multiplier}）
+                  </small>
                 </div>
                 <div className="summary-item" style={{ marginTop: 8 }}>
                   <span>再計算後</span>
