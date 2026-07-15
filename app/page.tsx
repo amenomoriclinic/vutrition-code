@@ -2041,6 +2041,7 @@ export default function HomePage() {
                       step="0.1"
                       inputMode="decimal"
                       value={estimate.actualAmount}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => updateEstimate(estimate.tempId, { actualAmount: Number(e.target.value) || 0 })}
                     />
                     <select
