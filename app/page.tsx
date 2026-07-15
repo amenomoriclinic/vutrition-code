@@ -1998,27 +1998,27 @@ export default function HomePage() {
                 <div className="estimate-nutrients-grid">
                   <label className="estimate-inline-field">
                     <span>kcal</span>
-                    <input type="number" value={estimate.baseCalories} onChange={(e) => updateEstimate(estimate.tempId, { baseCalories: Number(e.target.value) || 0 })} />
+                    <input type="number" value={estimate.baseCalories} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCalories: Number(e.target.value) || 0 })} />
                   </label>
                   <label className="estimate-inline-field">
                     <span>P(g)</span>
-                    <input type="number" value={estimate.baseProtein} onChange={(e) => updateEstimate(estimate.tempId, { baseProtein: Number(e.target.value) || 0 })} />
+                    <input type="number" value={estimate.baseProtein} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseProtein: Number(e.target.value) || 0 })} />
                   </label>
                   <label className="estimate-inline-field">
                     <span>F(g)</span>
-                    <input type="number" value={estimate.baseFat} onChange={(e) => updateEstimate(estimate.tempId, { baseFat: Number(e.target.value) || 0 })} />
+                    <input type="number" value={estimate.baseFat} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseFat: Number(e.target.value) || 0 })} />
                   </label>
                   <label className="estimate-inline-field">
                     <span>C(g)</span>
-                    <input type="number" value={estimate.baseCarbs} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
+                    <input type="number" value={estimate.baseCarbs} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
                   </label>
                   <label className="estimate-inline-field">
                     <span>塩(g)</span>
-                    <input type="number" step="0.1" value={estimate.baseSalt} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
+                    <input type="number" step="0.1" value={estimate.baseSalt} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
                   </label>
                   <label className="estimate-inline-field">
                     <span>リン(mg)</span>
-                    <input type="number" step="1" value={estimate.basePhosphorus} onChange={(e) => updateEstimate(estimate.tempId, { basePhosphorus: Number(e.target.value) || 0 })} />
+                    <input type="number" step="1" value={estimate.basePhosphorus} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { basePhosphorus: Number(e.target.value) || 0 })} />
                   </label>
                   <label className="estimate-inline-field">
                     <span>吸収率</span>
@@ -2028,6 +2028,7 @@ export default function HomePage() {
                       max="1"
                       step="0.01"
                       value={estimate.phosphorusAbsorptionRate}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => updateEstimate(estimate.tempId, { phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(e.target.value)) })}
                     />
                   </label>
