@@ -402,6 +402,51 @@ small {
   color: #64748b;
 }
 
+.health-trend-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.health-trend-range-button {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.health-trend-range-button-active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+}
+
+.health-trend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.health-trend-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.health-trend-empty-title {
+  font-weight: 700;
+  color: #334155;
+}
+
 .estimate-card {
   padding: 14px;
 }
@@ -921,6 +966,9 @@ small {
   .metric-panel {
     height: 250px;
     min-height: 250px;
+  }
+  .health-trend-grid {
+    grid-template-columns: 1fr;
   }
 }
 

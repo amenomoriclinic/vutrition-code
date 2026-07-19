@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
+import HealthTrendChart, { HealthTrendRange } from './components/HealthTrendChart';
 import { getDRI } from '../lib/dri';
 
 type Sex = 'male' | 'female';
@@ -417,6 +418,9 @@ export default function HomePage() {
   const [healthToday, setHealthToday] = useState<HealthRecord | null>(null);
   const [savedHeight, setSavedHeight] = useState<number | null>(null);
   const [healthStatusMessage, setHealthStatusMessage] = useState('');
+  const [healthTrendRange, setHealthTrendRange] = useState<HealthTrendRange>(7);
+  const [healthTrend, setHealthTrend] = useState<HealthRecord[]>([]);
+  const [healthTrendLoading, setHealthTrendLoading] = useState(false);
   const bulkRecordSaveResetTimer = useRef<number | null>(null);
 
   // Generic save/record button feedback: idle → saving → success/error → idle.
@@ -609,6 +613,10 @@ export default function HomePage() {
   useEffect(() => {
     void loadHealthRecords();
   }, []);
+
+  useEffect(() => {
+    void loadHealthTrend(healthTrendRange);
+  }, [healthTrendRange]);
 
   useEffect(() => {
     if (photoFiles.length === 0) {
@@ -813,6 +821,46 @@ export default function HomePage() {
     }
   };
 
+  const loadHealthTrend = async (range: HealthTrendRange) => {
+    if (!isSupabaseConfigured) {
+      setHealthTrend([]);
+      return;
+    }
+
+    setHealthTrendLoading(true);
+    const today = toJstDateString();
+    const since = new Date();
+    since.setDate(since.getDate() - (range - 1));
+    const periodStart = toJstDateString(since);
+
+    const { data, error } = await supabase
+      .from('health_records')
+      .select('id,date,weight,body_fat,muscle_mass,bone_mass,metabolic_age,height,bmi,systolic_bp,diastolic_bp,pulse,created_at')
+      .gte('date', periodStart)
+      .lte('date', today)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[health] trend fetch failed', error);
+      setHealthTrendLoading(false);
+      return;
+    }
+
+    // Legacy data can hold several rows per date; keep the newest one per day.
+    const rows = (data || []).map(mapHealthRecord);
+    const latestByDate = new Map<string, HealthRecord>();
+    rows.forEach((row) => {
+      if (!latestByDate.has(row.date)) {
+        latestByDate.set(row.date, row);
+      }
+    });
+
+    // Charts read left-to-right, so flip back to ascending order.
+    setHealthTrend(Array.from(latestByDate.values()).sort((a, b) => a.date.localeCompare(b.date)));
+    setHealthTrendLoading(false);
+  };
+
   const saveDailyHealthRecord = async (): Promise<boolean> => {
     if (!isSupabaseConfigured) {
       setHealthStatusMessage('Supabase が未設定のため保存できません。');
@@ -878,6 +926,7 @@ export default function HomePage() {
         writeStoredHeight(height);
       }
       await loadHealthRecords();
+      await loadHealthTrend(healthTrendRange);
       return true;
     } catch (error) {
       console.error('[health] save failed', error);
@@ -2260,6 +2309,16 @@ export default function HomePage() {
           );
         })()}
         {healthStatusMessage ? <p><small>{healthStatusMessage}</small></p> : null}
+      </div>
+
+      <div className="page-card">
+        <h2 className="section-title">健康記録の推移</h2>
+        <HealthTrendChart
+          records={healthTrend}
+          range={healthTrendRange}
+          onRangeChange={setHealthTrendRange}
+          loading={healthTrendLoading}
+        />
       </div>
 
       <div className="page-card">
