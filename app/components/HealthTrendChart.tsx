@@ -138,7 +138,7 @@ export default function HealthTrendChart({ records, range, onRangeChange, loadin
       </div>
       <div className="health-trend-grid">
         {charts.map((chart) => (
-          <div className="metric-panel" key={chart.title}>
+          <div className="health-trend-panel" key={chart.title}>
             {loading ? (
               <div className="health-trend-empty">読み込み中...</div>
             ) : chart.enough ? (

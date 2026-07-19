@@ -431,6 +431,36 @@ small {
   gap: 12px;
 }
 
+/* Landscape panels: the aspect ratio keeps every chart wider than tall at any
+   column width, so the date axis stays readable. */
+.health-trend-panel {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 8px;
+  aspect-ratio: 16 / 9;
+  min-height: 200px;
+}
+
+.health-trend-toggle {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #0f766e;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.health-trend-toggle-open {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+  margin-bottom: 16px;
+}
+
 .health-trend-empty {
   display: flex;
   flex-direction: column;

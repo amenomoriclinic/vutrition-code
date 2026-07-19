@@ -421,6 +421,10 @@ export default function HomePage() {
   const [healthTrendRange, setHealthTrendRange] = useState<HealthTrendRange>(7);
   const [healthTrend, setHealthTrend] = useState<HealthRecord[]>([]);
   const [healthTrendLoading, setHealthTrendLoading] = useState(false);
+  const [healthTrendOpen, setHealthTrendOpen] = useState(false);
+  // Latest weight recorded in health_records; when present the profile weight
+  // field mirrors it instead of being hand-entered.
+  const [latestHealthWeight, setLatestHealthWeight] = useState<number | null>(null);
   const bulkRecordSaveResetTimer = useRef<number | null>(null);
 
   // Generic save/record button feedback: idle → saving → success/error → idle.
@@ -615,8 +619,14 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    void loadLatestHealthWeight();
+  }, []);
+
+  // The trend section is collapsed by default, so only fetch once it is opened.
+  useEffect(() => {
+    if (!healthTrendOpen) return;
     void loadHealthTrend(healthTrendRange);
-  }, [healthTrendRange]);
+  }, [healthTrendRange, healthTrendOpen]);
 
   useEffect(() => {
     if (photoFiles.length === 0) {
@@ -861,6 +871,35 @@ export default function HomePage() {
     setHealthTrendLoading(false);
   };
 
+  const loadLatestHealthWeight = async () => {
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('health_records')
+      .select('weight,date,created_at')
+      .not('weight', 'is', null)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('[health] latest weight fetch failed', error);
+      return;
+    }
+
+    const weight = data && data[0]?.weight != null ? Number(data[0].weight) : null;
+    if (weight == null || !Number.isFinite(weight)) {
+      // No recorded weight yet: leave the profile field editable by hand.
+      setLatestHealthWeight(null);
+      return;
+    }
+
+    setLatestHealthWeight(weight);
+    setProfile((prev) => (prev.weight === weight ? prev : { ...prev, weight }));
+  };
+
   const saveDailyHealthRecord = async (): Promise<boolean> => {
     if (!isSupabaseConfigured) {
       setHealthStatusMessage('Supabase が未設定のため保存できません。');
@@ -926,7 +965,10 @@ export default function HomePage() {
         writeStoredHeight(height);
       }
       await loadHealthRecords();
-      await loadHealthTrend(healthTrendRange);
+      await loadLatestHealthWeight();
+      if (healthTrendOpen) {
+        await loadHealthTrend(healthTrendRange);
+      }
       return true;
     } catch (error) {
       console.error('[health] save failed', error);
@@ -2312,16 +2354,6 @@ export default function HomePage() {
       </div>
 
       <div className="page-card">
-        <h2 className="section-title">健康記録の推移</h2>
-        <HealthTrendChart
-          records={healthTrend}
-          range={healthTrendRange}
-          onRangeChange={setHealthTrendRange}
-          loading={healthTrendLoading}
-        />
-      </div>
-
-      <div className="page-card">
         <h2 className="section-title">日次集計</h2>
         <label className="date-filter-box">
           <span className="date-filter-label">日付を選択</span>
@@ -2581,7 +2613,12 @@ export default function HomePage() {
           </label>
           <label>
             体重(kg)
-            <input type="number" value={profile.weight} onChange={(e) => setProfile({ ...profile, weight: Number(e.target.value) })} />
+            <input
+              type="number"
+              value={profile.weight}
+              readOnly={latestHealthWeight != null}
+              onChange={(e) => setProfile({ ...profile, weight: Number(e.target.value) })}
+            />
           </label>
           <label>
             性別
@@ -2599,7 +2636,33 @@ export default function HomePage() {
             </select>
           </label>
         </div>
+        <p>
+          <small>
+            {latestHealthWeight != null
+              ? '体重は毎日の健康記録の最新値を自動で反映しています。'
+              : '体重の健康記録がないため、手動で入力してください。'}
+          </small>
+        </p>
         <p><small>推定エネルギー必要量は体重と活動レベルを元に簡易計算しています。</small></p>
+      </div>
+
+      <div className="page-card">
+        <button
+          type="button"
+          className={`health-trend-toggle${healthTrendOpen ? ' health-trend-toggle-open' : ''}`}
+          aria-expanded={healthTrendOpen}
+          onClick={() => setHealthTrendOpen((prev) => !prev)}
+        >
+          {healthTrendOpen ? '健康トレンドを閉じる' : '健康トレンドを見る'}
+        </button>
+        {healthTrendOpen ? (
+          <HealthTrendChart
+            records={healthTrend}
+            range={healthTrendRange}
+            onRangeChange={setHealthTrendRange}
+            loading={healthTrendLoading}
+          />
+        ) : null}
       </div>
     </main>
   );
