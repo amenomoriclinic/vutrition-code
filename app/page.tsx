@@ -99,6 +99,7 @@ type NutritionRecordInsert = {
   source?: string;
   description?: string | null;
   image_url?: string | null;
+  created_at?: string;
 };
 
 type WeeklySummaryAnalysis = {
@@ -164,6 +165,17 @@ const jstDateFormatter = new Intl.DateTimeFormat('sv-SE', {
 const toJstDateString = (input?: string | Date | null) => {
   const d = input ? new Date(input) : new Date();
   return jstDateFormatter.format(d);
+};
+
+// Records are bucketed by their JST calendar date, so a save has to land on the date the user
+// picked. Today keeps the real clock time; any other date anchors to 12:00 JST, which stays
+// inside that day no matter how the timestamp is later converted.
+const jstDateToTimestamp = (jstDate: string) => {
+  const now = new Date();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(jstDate) || jstDate === toJstDateString(now)) {
+    return now.toISOString();
+  }
+  return new Date(`${jstDate}T12:00:00+09:00`).toISOString();
 };
 
 const isValidFavorite = (v: any): v is FavoriteFood => {
@@ -1116,14 +1128,21 @@ export default function HomePage() {
   };
 
   const insertNutritionRecordsWithFallback = async (rows: NutritionRecordInsert[]) => {
-    let { data, error } = await supabase.from('nutrition_records').insert(rows).select();
+    // Without an explicit created_at the column falls back to now(), which would file every
+    // record under today instead of the date selected in 日次集計.
+    const stampedRows: NutritionRecordInsert[] = rows.map((target) => ({
+      ...target,
+      created_at: target.created_at || jstDateToTimestamp(dateFilter),
+    }));
+
+    let { data, error } = await supabase.from('nutrition_records').insert(stampedRows).select();
 
     if (error) {
       const message = formatSupabaseError(error).toLowerCase();
       const mayBeSchemaMismatch = /column|schema cache|does not exist|unknown/.test(message);
 
       if (mayBeSchemaMismatch) {
-        const fallbackRows = rows.map((target) => ({
+        const fallbackRows = stampedRows.map((target) => ({
           name: target.name,
           amount_text: target.amount_text,
           calories: target.calories,
@@ -1134,6 +1153,7 @@ export default function HomePage() {
           phosphorus: target.phosphorus,
           phosphorus_absorption_rate: target.phosphorus_absorption_rate,
           description: target.description || null,
+          created_at: target.created_at,
         }));
 
         const fallbackResult = await supabase.from('nutrition_records').insert(fallbackRows).select();
@@ -1529,6 +1549,7 @@ export default function HomePage() {
           description: r.description || '',
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
+          createdAtRaw: r.created_at || undefined,
           multiplier: Number(r.multiplier) || 1,
           source: (r.source || 'photo') as NutritionRecord['source'],
         }));
@@ -1615,6 +1636,7 @@ export default function HomePage() {
           description: r.description || favorite.name,
           imageUrl: r.image_url || undefined,
           createdAt: toJstDateString(r.created_at),
+          createdAtRaw: r.created_at || undefined,
           multiplier: Number(r.multiplier) || 1,
           source: r.source || 'favorite',
         };
