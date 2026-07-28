@@ -123,6 +123,62 @@ main {
   background: #ffffff;
 }
 
+.daily-note-box {
+  margin: 14px 0 4px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.daily-note-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.daily-note-input {
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.5;
+}
+
+.daily-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.daily-note-save {
+  min-width: 140px;
+  border-radius: 12px;
+  font-weight: 700;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.daily-note-save:disabled {
+  cursor: default;
+}
+
+.daily-note-save.daily-note-save-saving {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.daily-note-save.daily-note-save-success {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.daily-note-save.daily-note-save-error {
+  background: #dc2626;
+  color: #ffffff;
+}
+
 .favorite-item {
   display: flex;
   gap: 6px;
@@ -739,11 +795,12 @@ small {
 }
 
 .record-delete {
-  padding: 1px 6px;
+  padding: 5px 10px;
   min-width: auto;
-  border-radius: 6px;
-  font-size: 0.82rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .record-save {
@@ -777,9 +834,9 @@ small {
 }
 
 .button-danger.record-delete {
-  padding: 1px 6px;
+  padding: 5px 10px;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .pending-row {
@@ -949,8 +1006,8 @@ small {
 
   .record-delete {
     width: auto;
-    padding: 1px 5px;
-    font-size: 0.76rem;
+    padding: 5px 9px;
+    font-size: 0.7rem;
   }
 
   .record-save {

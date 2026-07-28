@@ -37,6 +37,17 @@ create table if not exists public.health_records (
   created_at timestamptz default now()
 );
 
+-- Free-form note for a single day ("その日の気づき・メモ").
+-- One row per date; the unique constraint on `date` backs the client upsert
+-- (onConflict: 'date') and already provides the lookup index.
+create table if not exists public.daily_notes (
+  id uuid primary key default gen_random_uuid(),
+  date date not null unique,
+  note text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 alter table public.health_records
   add column if not exists body_fat numeric;
 

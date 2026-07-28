@@ -427,6 +427,12 @@ export default function HomePage() {
     diastolicBp: '',
     pulse: '',
   });
+  const [dailyNote, setDailyNote] = useState('');
+  const [dailyNoteLoading, setDailyNoteLoading] = useState(false);
+  const [dailyNoteMessage, setDailyNoteMessage] = useState('');
+  // Guards against a slow fetch for a previously selected date overwriting the
+  // note of the date the user has since switched to.
+  const dailyNoteRequestRef = useRef('');
   const [healthToday, setHealthToday] = useState<HealthRecord | null>(null);
   const [savedHeight, setSavedHeight] = useState<number | null>(null);
   const [healthStatusMessage, setHealthStatusMessage] = useState('');
@@ -640,6 +646,13 @@ export default function HomePage() {
     void loadHealthTrend(healthTrendRange);
   }, [healthTrendRange, healthTrendOpen]);
 
+  // Notes are per-day: reload whenever the selected date changes.
+  useEffect(() => {
+    setDailyNote('');
+    setDailyNoteMessage('');
+    void loadDailyNote(dateFilter);
+  }, [dateFilter]);
+
   useEffect(() => {
     if (photoFiles.length === 0) {
       setPhotoPreviews([]);
@@ -780,6 +793,66 @@ export default function HomePage() {
     const m = heightCm / 100;
     const bmi = weight / (m * m);
     return Number.isFinite(bmi) ? round1(bmi) : null;
+  };
+
+  const loadDailyNote = async (date: string) => {
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    dailyNoteRequestRef.current = date;
+    setDailyNoteLoading(true);
+
+    const { data, error } = await supabase
+      .from('daily_notes')
+      .select('note')
+      .eq('date', date)
+      .maybeSingle();
+
+    // Ignore the response if the user already moved to another date.
+    if (dailyNoteRequestRef.current !== date) {
+      return;
+    }
+
+    setDailyNoteLoading(false);
+
+    if (error) {
+      console.error('[daily-note] fetch failed', error);
+      setDailyNoteMessage(`メモの読み込みに失敗しました: ${formatSupabaseError(error)}`);
+      return;
+    }
+
+    setDailyNote(data?.note ? String(data.note) : '');
+  };
+
+  const saveDailyNote = async (): Promise<boolean> => {
+    if (!isSupabaseConfigured) {
+      setDailyNoteMessage('Supabase 未設定で保存できません。');
+      return false;
+    }
+
+    const date = dateFilter;
+    const note = dailyNote.trim();
+
+    try {
+      // An emptied note removes the row instead of storing a blank one.
+      if (!note) {
+        const { error } = await supabase.from('daily_notes').delete().eq('date', date);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('daily_notes')
+          .upsert({ date, note, updated_at: new Date().toISOString() }, { onConflict: 'date' });
+        if (error) throw error;
+      }
+
+      setDailyNoteMessage('');
+      return true;
+    } catch (error) {
+      console.error('[daily-note] save failed', error);
+      setDailyNoteMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
+      return false;
+    }
   };
 
   const loadHealthRecords = async () => {
@@ -1685,13 +1758,21 @@ export default function HomePage() {
     }
     (async () => {
       try {
-        const { error } = await supabase.from('nutrition_records').delete().eq('id', id);
+        // Ask for the deleted row back: without .select() a delete that matched no
+        // row still returns no error, and the record would vanish from the screen
+        // while staying in the database until the next reload.
+        const { data, error } = await supabase.from('nutrition_records').delete().eq('id', id).select('id');
         if (error) {
           console.error('Supabase delete error', error);
-          setStatusMessage('削除に失敗しました。');
+          setStatusMessage(`削除に失敗しました: ${formatSupabaseError(error)}`);
           return;
         }
-        setRecords(records.filter((record) => record.id !== id));
+        if (!data || data.length === 0) {
+          setStatusMessage('削除できませんでした。画面を再読み込みしてお試しください。');
+          return;
+        }
+        setRecords((prev) => prev.filter((record) => record.id !== id));
+        clearMultiplierOverride(id);
         setStatusMessage('記録を削除しました。');
       } catch (e) {
         console.error(e);
@@ -2445,6 +2526,44 @@ export default function HomePage() {
           <span>必要量との差</span>
           <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
         </div>
+        {(() => {
+          const st = saveStates['daily-note'] ?? 'idle';
+          return (
+            <div className="daily-note-box">
+              <label className="daily-note-label" htmlFor="daily-note-input">
+                その日の気づき・メモ
+              </label>
+              <textarea
+                id="daily-note-input"
+                className="daily-note-input"
+                rows={4}
+                value={dailyNote}
+                placeholder="体調・気づいたこと・食事の振り返りなど"
+                disabled={dailyNoteLoading}
+                onChange={(e) => setDailyNote(e.target.value)}
+              />
+              <div className="daily-note-actions">
+                <button
+                  type="button"
+                  className={`button-secondary daily-note-save daily-note-save-${st}`}
+                  disabled={dailyNoteLoading || st === 'saving'}
+                  onClick={() => {
+                    void runSave('daily-note', saveDailyNote);
+                  }}
+                >
+                  {st === 'saving'
+                    ? '保存中...'
+                    : st === 'success'
+                      ? '✓ 保存しました'
+                      : st === 'error'
+                        ? '保存に失敗しました'
+                        : 'メモを保存'}
+                </button>
+                {dailyNoteMessage ? <small className="weekly-summary-error">{dailyNoteMessage}</small> : null}
+              </div>
+            </div>
+          );
+        })()}
         {weeklySummary ? (
           <div className="weekly-summary-card">
             <div className="weekly-summary-header">
@@ -2554,7 +2673,7 @@ export default function HomePage() {
                     <span className="record-kcal">-{record.calories.toFixed(0)} kcal</span>
                   </div>
                   <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
-                    ×
+                    削除
                   </button>
                 </div>
               </div>
@@ -2608,7 +2727,7 @@ export default function HomePage() {
                     />
                   </label>
                   <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
-                    ×
+                    削除
                   </button>
                 </div>
               </div>
