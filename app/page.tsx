@@ -45,6 +45,17 @@ type EditableEstimate = NutritionEstimate & {
   baseCarbs: number;
   baseSalt: number;
   basePhosphorus: number;
+  // Weight/volume of one base piece or serving when the label states it,
+  // e.g. "1パック(300g)あたり" → 300 g. Lets grams be converted to pieces and back.
+  baseWeight: number | null;
+  baseWeightUnit: 'g' | 'ml' | null;
+  // Where the label's salt value came from: printed 食塩相当量, converted from
+  // ナトリウム, or not printed at all. Absent for photo/text estimates.
+  saltSource?: 'label' | 'sodium' | 'missing';
+  sodiumMg?: number | null;
+  // True when the eaten amount's unit cannot be related to the label's unit
+  // (e.g. grams for a "1パックあたり" label without the pack weight).
+  conversionError?: boolean;
 };
 
 type PendingFood = {
@@ -97,6 +108,35 @@ type FavoriteFood = {
   salt: number;
   phosphorus: number;
   phosphorusAbsorptionRate: number;
+  sortOrder?: number;
+  // Per-base values when registered from a nutrition label (stored for later use).
+  labelBase?: FavoriteLabelBase | null;
+};
+
+// Raw input strings of the favorite food form (adding or editing).
+type FavoriteDraft = {
+  name: string;
+  amountText: string;
+  calories: string;
+  protein: string;
+  fat: string;
+  carbs: string;
+  salt: string;
+  phosphorus: string;
+  phosphorusAbsorptionRate: string;
+};
+
+type FavoriteLabelBase = {
+  amountText: string;
+  amount: number;
+  unit: LabelAmountUnit;
+  weight: number | null;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  salt: number;
+  phosphorus: number;
 };
 
 type NutritionRecordInsert = {
@@ -240,6 +280,8 @@ const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
 const STORAGE_MULTIPLIER_OVERRIDES = 'nutrition_multiplier_overrides';
 
+// Preset favorites. They are copied into favorite_foods once (keyed by id) and
+// are edited or deleted there afterwards; the code values are not reapplied.
 const defaultFavorites: FavoriteFood[] = [
   {
     id: 'inonoras',
@@ -354,12 +396,107 @@ const defaultFavorites: FavoriteFood[] = [
 
 const defaultFavoriteById = new Map(defaultFavorites.map((item) => [item.id, item]));
 
+// Set once this device has copied its favorites into Supabase. The localStorage
+// copy itself is left untouched as a backup.
+const STORAGE_FAVORITES_MIGRATED = 'nutrition_favorites_migrated_to_db';
+
+// Favorites the user added on this device before they moved to Supabase (the
+// presets always came from the code, so only non-preset ids are kept).
+const readLocalCustomFavorites = (): FavoriteFood[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_FAVORITES) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(isValidFavorite)
+      .filter((f) => !defaultFavoriteById.has(String(f.id)))
+      .map((f) => ({
+        id: String(f.id),
+        name: String(f.name),
+        amountText: String(f.amountText || '1単位'),
+        calories: Number(f.calories) || 0,
+        protein: Number(f.protein) || 0,
+        fat: Number(f.fat) || 0,
+        carbs: Number(f.carbs) || 0,
+        salt: Number(f.salt) || 0,
+        phosphorus: pickPhosphorusValue(f) || 0,
+        phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(f, 0.5),
+      }))
+      .filter((f) => !isLegacyInoras120(f));
+  } catch {
+    return [];
+  }
+};
+
+const toFavoriteRow = (favorite: FavoriteFood) => ({
+  name: favorite.name,
+  amount_text: favorite.amountText || null,
+  calories: favorite.calories,
+  protein: favorite.protein,
+  fat: favorite.fat,
+  carbs: favorite.carbs,
+  salt: favorite.salt,
+  phosphorus: favorite.phosphorus,
+  phosphorus_absorption_rate: favorite.phosphorusAbsorptionRate,
+  label_base: favorite.labelBase ?? null,
+  sort_order: favorite.sortOrder ?? 0,
+});
+
+const mapFavoriteRow = (row: any): FavoriteFood => ({
+  id: String(row.id),
+  name: String(row.name || ''),
+  amountText: String(row.amount_text || ''),
+  calories: Number(row.calories) || 0,
+  protein: Number(row.protein) || 0,
+  fat: Number(row.fat) || 0,
+  carbs: Number(row.carbs) || 0,
+  salt: Number(row.salt) || 0,
+  phosphorus: Number(row.phosphorus) || 0,
+  phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(row.phosphorus_absorption_rate ?? 0.5)),
+  sortOrder: Number(row.sort_order) || 0,
+  labelBase: row.label_base ?? null,
+});
 
 const labelDisplayUnitOptions: Record<LabelDisplayUnit, { label: string; baseAmount: number; baseUnit: LabelAmountUnit; defaultActualUnit: LabelAmountUnit }> = {
   per100g: { label: '100gあたり', baseAmount: 100, baseUnit: 'g', defaultActualUnit: 'g' },
   perPiece: { label: '1個（1本・1袋）あたり', baseAmount: 1, baseUnit: '個', defaultActualUnit: '個' },
   per100ml: { label: '100mlあたり', baseAmount: 100, baseUnit: 'ml', defaultActualUnit: 'ml' },
   perServing: { label: '1食分あたり', baseAmount: 1, baseUnit: '食分', defaultActualUnit: '食分' },
+};
+
+const isWeightUnit = (unit: LabelAmountUnit) => unit === 'g' || unit === 'ml';
+
+// How many label base amounts the eaten amount corresponds to:
+//   250g of a "100gあたり" label → 2.5
+//   250g of a "1パック(300g)あたり" label → 250 / 300 (needs the pack weight)
+// g and ml are treated alike (≈1 g/ml), as are 個 and 食分. Returns null when
+// the units cannot be related, e.g. grams of a per-pack label without its weight,
+// or pieces of a per-100g label.
+const labelScale = (
+  actualAmount: number,
+  actualUnit: LabelAmountUnit,
+  baseAmount: number,
+  baseUnit: LabelAmountUnit,
+  baseWeight: number | null,
+): number | null => {
+  const actualIsWeight = isWeightUnit(actualUnit);
+  if (actualIsWeight === isWeightUnit(baseUnit)) return actualAmount / baseAmount;
+  if (actualIsWeight && baseWeight && baseWeight > 0) return actualAmount / baseWeight;
+  return null;
+};
+
+// 食塩相当量 above this per 100 g is almost certainly a sodium value in mg read as
+// grams (the saltiest everyday foods, like soy sauce, are ~15 g per 100 g).
+const SUSPICIOUS_SALT_PER_100G = 20;
+
+const isSuspiciousLabelSalt = (estimate: {
+  baseSalt: number;
+  baseAmount: number;
+  baseUnit: LabelAmountUnit;
+  baseWeight: number | null;
+}) => {
+  const grams = isWeightUnit(estimate.baseUnit) ? estimate.baseAmount : estimate.baseWeight;
+  const per100 = grams && grams > 0 ? (estimate.baseSalt / grams) * 100 : estimate.baseSalt;
+  return per100 > SUSPICIOUS_SALT_PER_100G;
 };
 
 // Options offered in the "実際に食べた量" unit selector.
@@ -464,7 +601,11 @@ export default function HomePage() {
   const [exerciseInputs, setExerciseInputs] = useState({ runKm: '0', manualKcal: '0', met: '3.5', metMinutes: '30' });
   const [estimates, setEstimates] = useState<EditableEstimate[]>([]);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
-  const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
+  const [favorites, setFavorites] = useState<FavoriteFood[]>([]);
+  // 'db': favorites live in Supabase and can be changed. 'local': Supabase could not
+  // be used, so this device's old list is shown read-only.
+  const [favoritesSource, setFavoritesSource] = useState<'loading' | 'db' | 'local'>('loading');
+  const [favoritesMessage, setFavoritesMessage] = useState('');
   const [profile, setProfile] = useState({ age: 35, sex: 'male' as Sex, weight: 60, activity: 'low' as ActivityLevel });
   const [dateFilter, setDateFilter] = useState(toJstDateString());
   // Today's date when the app was last in the foreground; used to jump back to
@@ -473,7 +614,11 @@ export default function HomePage() {
   const [view, setView] = useState<AppView>('home');
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [favoriteName, setFavoriteName] = useState('');
+  // null: form closed, 'new': adding, otherwise the id of the favorite being edited.
+  const [favoriteFormTarget, setFavoriteFormTarget] = useState<string | null>(null);
+  const [favoriteDraft, setFavoriteDraft] = useState<FavoriteDraft | null>(null);
+  // Name typed for registering a label estimate as a favorite, by estimate tempId.
+  const [labelFavoriteNames, setLabelFavoriteNames] = useState<Record<string, string>>({});
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
@@ -608,40 +753,9 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
     const savedProfile = localStorage.getItem(STORAGE_PROFILE);
 
-    // The code-defined presets are always the source of truth so newly added
-    // presets (e.g. beer / sake) and updated values show up on every device.
-    // Stale localStorage snapshots are ignored for presets; only favorites the
-    // user added themselves (ids that are not presets) are restored.
-    let customFavorites: FavoriteFood[] = [];
-    if (savedFavorites) {
-      try {
-        const parsed = JSON.parse(savedFavorites);
-        if (Array.isArray(parsed)) {
-          customFavorites = parsed
-            .filter(isValidFavorite)
-            .filter((f) => !defaultFavoriteById.has(String(f.id)))
-            .map((f) => ({
-              id: String(f.id),
-              name: String(f.name),
-              amountText: String(f.amountText || '1単位'),
-              calories: Number(f.calories) || 0,
-              protein: Number(f.protein) || 0,
-              fat: Number(f.fat) || 0,
-              carbs: Number(f.carbs) || 0,
-              salt: Number(f.salt) || 0,
-              phosphorus: pickPhosphorusValue(f) || 0,
-              phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(f, 0.5),
-            }))
-            .filter((f) => !isLegacyInoras120(f));
-        }
-      } catch {
-        customFavorites = [];
-      }
-    }
-    setFavorites([...defaultFavorites, ...customFavorites]);
+    void loadFavorites();
 
     if (savedProfile) {
       try {
@@ -852,9 +966,6 @@ export default function HomePage() {
 
   // records are persisted in Supabase; no localStorage sync needed
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_FAVORITES, JSON.stringify(favorites));
-  }, [favorites]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_PROFILE, JSON.stringify(profile));
@@ -873,6 +984,8 @@ export default function HomePage() {
   }, []);
 
   const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
+  // 食塩相当量 is printed to 0.01 g on labels (e.g. 0.04 g), so it keeps two decimals.
+  const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
   const formatSupabaseError = (error: any) => {
     if (!error) return '不明なエラー';
@@ -1472,18 +1585,27 @@ export default function HomePage() {
     const baseAmount = Math.max(0.0001, Number(estimate.baseAmount) || 1);
     const rawActual = Number(estimate.actualAmount);
     const actualAmount = Number.isFinite(rawActual) && rawActual > 0 ? rawActual : baseAmount;
-    const scale = actualAmount / baseAmount;
+    // Labels relate units (250g of a "1パック(300g)あたり" label); photo/text
+    // estimates keep the plain ratio they always used.
+    const scale = estimate.mode === 'label'
+      ? labelScale(actualAmount, estimate.actualUnit, baseAmount, estimate.baseUnit, estimate.baseWeight)
+      : actualAmount / baseAmount;
+    if (scale == null) {
+      // Keep the previous values but block saving until the unit can be converted.
+      return { ...estimate, baseAmount, actualAmount, conversionError: true };
+    }
     return {
       ...estimate,
       baseAmount,
       actualAmount,
+      conversionError: false,
       quantity: 1,
       multiplier: round1(scale),
       calories: round1(estimate.baseCalories * scale),
       protein: round1(estimate.baseProtein * scale),
       fat: round1(estimate.baseFat * scale),
       carbs: round1(estimate.baseCarbs * scale),
-      salt: round1(estimate.baseSalt * scale),
+      salt: round2(estimate.baseSalt * scale),
       phosphorus: round1(estimate.basePhosphorus * scale),
     };
   };
@@ -1665,6 +1787,10 @@ export default function HomePage() {
         let estimateResponse: NutritionEstimate;
         let estBaseAmount: number;
         let estBaseUnit: LabelAmountUnit;
+        let labelExtras: Pick<EditableEstimate, 'baseWeight' | 'baseWeightUnit' | 'saltSource' | 'sodiumMg'> = {
+          baseWeight: null,
+          baseWeightUnit: null,
+        };
         if (result.estimate.mode === 'label') {
           // Claude reads the label's own display unit (100gあたり / 1個あたり / 100mlあたり ...).
           estBaseAmount = Math.max(0.1, Number(result.estimate.baseAmount) || Number(item.labelBaseAmount) || 100);
@@ -1682,6 +1808,14 @@ export default function HomePage() {
             phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(result.estimate, 0.85),
             description: `${item.description ? `${item.description} ` : ''}栄養表示: ${detectedAmountText}。下の「実際に食べた量」を入力すると栄養値が自動換算されます。`,
             imageUrl: item.previewUrl,
+          };
+          const detectedWeight = Number(result.estimate.baseWeight);
+          const detectedSodium = result.estimate.sodiumMg == null ? null : Number(result.estimate.sodiumMg);
+          labelExtras = {
+            baseWeight: Number.isFinite(detectedWeight) && detectedWeight > 0 ? detectedWeight : null,
+            baseWeightUnit: result.estimate.baseWeightUnit === 'ml' ? 'ml' : result.estimate.baseWeightUnit === 'g' ? 'g' : null,
+            saltSource: result.estimate.saltSource === 'sodium' || result.estimate.saltSource === 'missing' ? result.estimate.saltSource : 'label',
+            sodiumMg: detectedSodium != null && Number.isFinite(detectedSodium) ? detectedSodium : null,
           };
         } else {
           // Photo/text estimates already reflect the whole portion (base = 1 serving).
@@ -1720,6 +1854,7 @@ export default function HomePage() {
           baseCarbs: estimateResponse.carbs,
           baseSalt: estimateResponse.salt,
           basePhosphorus: estimateResponse.phosphorus,
+          ...labelExtras,
         }));
         successCount += 1;
       }
@@ -1770,7 +1905,7 @@ export default function HomePage() {
         baseProtein: round1(estimate.baseProtein * scale),
         baseFat: round1(estimate.baseFat * scale),
         baseCarbs: round1(estimate.baseCarbs * scale),
-        baseSalt: round1(estimate.baseSalt * scale),
+        baseSalt: round2(estimate.baseSalt * scale),
         basePhosphorus: round1(estimate.basePhosphorus * scale),
       });
     }));
@@ -1796,7 +1931,7 @@ export default function HomePage() {
         protein: round1(target.protein),
         fat: round1(target.fat),
         carbs: round1(target.carbs),
-        salt: round1(target.salt),
+        salt: round2(target.salt),
         phosphorus: round1(target.phosphorus),
         phosphorus_absorption_rate: clampPhosphorusAbsorptionRate(target.phosphorusAbsorptionRate),
         multiplier: round1((target.quantity || 1) * (target.multiplier || 1)),
@@ -1931,34 +2066,314 @@ export default function HomePage() {
     }
   };
 
-  const addFavorite = () => {
-    if (!favoriteName.trim()) {
-      setStatusMessage('お気に入りの食品名を入力してください。');
+  const loadFavorites = async () => {
+    const localCustom = readLocalCustomFavorites();
+    const localList = [...defaultFavorites, ...localCustom];
+    if (!isSupabaseConfigured) {
+      setFavorites(localList);
+      setFavoritesSource('local');
       return;
     }
-    const newFavorite: FavoriteFood = {
-      id: crypto.randomUUID(),
-      name: favoriteName.trim(),
-      amountText: '1単位',
-      calories: 0,
-      protein: 0,
-      fat: 0,
-      carbs: 0,
-      salt: 0,
-      phosphorus: 0,
-      phosphorusAbsorptionRate: 0.5,
-    };
-    setFavorites([newFavorite, ...favorites]);
-    setFavoriteName('');
-    setStatusMessage('マイ定番食品に保存しました。');
+
+    try {
+      // One-time copy of the presets and this device's own favorites. Rows are keyed
+      // by their old id, so running this on the phone and the PC merges both lists
+      // without duplicates, and a preset deleted on one device stays deleted.
+      let migrated = false;
+      try {
+        migrated = localStorage.getItem(STORAGE_FAVORITES_MIGRATED) === '1';
+      } catch {
+        migrated = false;
+      }
+      if (!migrated) {
+        const rows = [
+          ...defaultFavorites.map((f, i) => ({ ...toFavoriteRow({ ...f, sortOrder: i }), legacy_id: f.id })),
+          ...localCustom.map((f, i) => ({ ...toFavoriteRow({ ...f, sortOrder: 100 + i }), legacy_id: f.id })),
+        ];
+        const { error } = await supabase
+          .from('favorite_foods')
+          .upsert(rows, { onConflict: 'legacy_id', ignoreDuplicates: true });
+        if (error) throw error;
+        try {
+          localStorage.setItem(STORAGE_FAVORITES_MIGRATED, '1');
+        } catch {
+          // Without the flag the migration simply runs (as a no-op) next time.
+        }
+      }
+
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .select('*')
+        .is('deleted_at', null)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+
+      setFavorites((data || []).map(mapFavoriteRow));
+      setFavoritesSource('db');
+      setFavoritesMessage('');
+    } catch (error) {
+      console.error('[favorites] load failed', error);
+      setFavorites(localList);
+      setFavoritesSource('local');
+      setFavoritesMessage(
+        `定番食品をデータベースから読み込めませんでした。この端末に保存されていた一覧を表示しています（追加・編集・削除はできません）: ${formatSupabaseError(error)}`
+      );
+    }
   };
 
-  const removeFavorite = (id: string) => {
+  const nextFavoriteSortOrder = () => favorites.reduce((max, f) => Math.max(max, f.sortOrder ?? 0), 0) + 1;
+
+  // Inserts a favorite and returns the stored one, or null (message already shown).
+  const insertFavorite = async (favorite: FavoriteFood): Promise<FavoriteFood | null> => {
+    if (favoritesSource !== 'db') {
+      setFavoritesMessage('定番食品のデータベースが使えないため追加できません。');
+      return null;
+    }
+    const { data, error } = await supabase
+      .from('favorite_foods')
+      .insert({ ...toFavoriteRow({ ...favorite, sortOrder: nextFavoriteSortOrder() }) })
+      .select('*');
+    if (error || !data || data.length === 0) {
+      console.error('[favorites] insert failed', error);
+      setFavoritesMessage(`定番食品の保存に失敗しました: ${error ? formatSupabaseError(error) : '保存結果を確認できませんでした'}`);
+      return null;
+    }
+    const saved = mapFavoriteRow(data[0]);
+    setFavorites((prev) => [...prev, saved]);
+    setFavoritesMessage('');
+    return saved;
+  };
+
+  const openFavoriteForm = (favorite?: FavoriteFood) => {
+    setFavoritesMessage('');
+    setFavoriteFormTarget(favorite ? favorite.id : 'new');
+    setFavoriteDraft({
+      name: favorite?.name ?? '',
+      amountText: favorite?.amountText ?? '',
+      calories: favorite ? String(favorite.calories) : '',
+      protein: favorite ? String(favorite.protein) : '',
+      fat: favorite ? String(favorite.fat) : '',
+      carbs: favorite ? String(favorite.carbs) : '',
+      salt: favorite ? String(favorite.salt) : '',
+      phosphorus: favorite ? String(favorite.phosphorus) : '',
+      phosphorusAbsorptionRate: String(favorite?.phosphorusAbsorptionRate ?? 0.5),
+    });
+  };
+
+  const closeFavoriteForm = () => {
+    setFavoriteFormTarget(null);
+    setFavoriteDraft(null);
+  };
+
+  const saveFavoriteForm = async (): Promise<boolean> => {
+    const target = favoriteFormTarget;
+    const draft = favoriteDraft;
+    if (!target || !draft) return false;
+    if (favoritesSource !== 'db') {
+      setFavoritesMessage('定番食品のデータベースが使えないため保存できません。');
+      return false;
+    }
+
+    const name = draft.name.trim();
+    if (!name) {
+      setFavoritesMessage('名前を入力してください。');
+      return false;
+    }
+    // Blank fields count as 0; anything non-numeric or negative is rejected.
+    const parse = (raw: string, round: (n: number) => number) => {
+      if (!raw.trim()) return 0;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? round(value) : null;
+    };
+    const values = {
+      calories: parse(draft.calories, round1),
+      protein: parse(draft.protein, round1),
+      fat: parse(draft.fat, round1),
+      carbs: parse(draft.carbs, round1),
+      salt: parse(draft.salt, round2),
+      phosphorus: parse(draft.phosphorus, round1),
+    };
+    if (Object.values(values).some((v) => v == null)) {
+      setFavoritesMessage('栄養値を正しく入力してください。');
+      return false;
+    }
+    const rate = Number(draft.phosphorusAbsorptionRate);
+    const fields = {
+      name,
+      amountText: draft.amountText.trim(),
+      calories: values.calories as number,
+      protein: values.protein as number,
+      fat: values.fat as number,
+      carbs: values.carbs as number,
+      salt: values.salt as number,
+      phosphorus: values.phosphorus as number,
+      phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(draft.phosphorusAbsorptionRate.trim() ? rate : 0.5),
+    };
+
+    if (target === 'new') {
+      const saved = await insertFavorite({ id: '', ...fields });
+      if (!saved) return false;
+      closeFavoriteForm();
+      return true;
+    }
+
+    const current = favorites.find((f) => f.id === target);
+    if (!current) return false;
+    // label_base and sort order are left as they are.
+    const { data, error } = await supabase
+      .from('favorite_foods')
+      .update({
+        name: fields.name,
+        amount_text: fields.amountText || null,
+        calories: fields.calories,
+        protein: fields.protein,
+        fat: fields.fat,
+        carbs: fields.carbs,
+        salt: fields.salt,
+        phosphorus: fields.phosphorus,
+        phosphorus_absorption_rate: fields.phosphorusAbsorptionRate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', target)
+      .select('*');
+    if (error || !data || data.length === 0) {
+      console.error('[favorites] update failed', error);
+      setFavoritesMessage(`定番食品の保存に失敗しました: ${error ? formatSupabaseError(error) : '画面を再読み込みしてお試しください'}`);
+      return false;
+    }
+    const saved = mapFavoriteRow(data[0]);
+    setFavorites((prev) => prev.map((f) => (f.id === target ? saved : f)));
+    closeFavoriteForm();
+    return true;
+  };
+
+  // "豆腐 250g": the label's product name plus the amount it was converted to.
+  const defaultLabelFavoriteName = (estimate: EditableEstimate) =>
+    `${estimate.name} ${estimate.actualAmount}${estimate.actualUnit}`.trim();
+
+  // Registers a label estimate, converted to the eaten amount, as a favorite. The
+  // label's per-base values go into labelBase for recording other amounts later.
+  const registerLabelEstimateAsFavorite = async (estimate: EditableEstimate): Promise<boolean> => {
+    if (estimate.conversionError) {
+      setStatusMessage('量を換算できないため登録できません。カードの案内に沿って入力してください。');
+      return false;
+    }
+    const name = (labelFavoriteNames[estimate.tempId] ?? defaultLabelFavoriteName(estimate)).trim();
+    if (!name) {
+      setStatusMessage('定番食品の名前を入力してください。');
+      return false;
+    }
+    const saved = await insertFavorite({
+      id: '',
+      name,
+      amountText: `${estimate.actualAmount}${estimate.actualUnit}`,
+      calories: round1(estimate.calories),
+      protein: round1(estimate.protein),
+      fat: round1(estimate.fat),
+      carbs: round1(estimate.carbs),
+      salt: round2(estimate.salt),
+      phosphorus: round1(estimate.phosphorus),
+      phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(estimate.phosphorusAbsorptionRate),
+      labelBase: {
+        amountText: estimate.amountText,
+        amount: estimate.baseAmount,
+        unit: estimate.baseUnit,
+        weight: estimate.baseWeight,
+        calories: estimate.baseCalories,
+        protein: estimate.baseProtein,
+        fat: estimate.baseFat,
+        carbs: estimate.baseCarbs,
+        salt: estimate.baseSalt,
+        phosphorus: estimate.basePhosphorus,
+      },
+    });
+    if (!saved) {
+      setStatusMessage('定番食品に登録できませんでした。「マイ定番食品」のメッセージを確認してください。');
+      return false;
+    }
+    setStatusMessage(`「${saved.name}」を定番食品に登録しました。`);
+    return true;
+  };
+
+  const renderFavoriteForm = () => {
+    if (!favoriteFormTarget || !favoriteDraft) return null;
+    const draft = favoriteDraft;
+    const st = saveStates['favorite-form'] ?? 'idle';
+    const setField = (key: keyof FavoriteDraft) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setFavoriteDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+    };
+    const numberField = (key: keyof FavoriteDraft, label: string, step: string) => (
+      <label className="record-edit-field">
+        <span>{label}</span>
+        <input type="number" min="0" step={step} inputMode="decimal" value={draft[key]} onChange={setField(key)} />
+      </label>
+    );
+    return (
+      <div className="record-edit-form favorite-form">
+        <strong>{favoriteFormTarget === 'new' ? '新しい定番食品' : '定番食品を編集'}</strong>
+        <div className="record-edit-grid">
+          <label className="record-edit-field record-edit-field-wide">
+            <span>名前</span>
+            <input value={draft.name} onChange={setField('name')} placeholder="例: 豆腐 250g" />
+          </label>
+          <label className="record-edit-field record-edit-field-wide">
+            <span>量</span>
+            <input value={draft.amountText} onChange={setField('amountText')} placeholder="例: 250g" />
+          </label>
+          {numberField('calories', 'kcal', '1')}
+          {numberField('protein', 'P(g)', '0.1')}
+          {numberField('fat', 'F(g)', '0.1')}
+          {numberField('carbs', 'C(g)', '0.1')}
+          {numberField('salt', '食塩相当量(g)', '0.01')}
+          {numberField('phosphorus', 'リン(mg)', '1')}
+          {numberField('phosphorusAbsorptionRate', 'リン吸収率(0〜1)', '0.05')}
+        </div>
+        <div className="record-edit-actions">
+          <button
+            type="button"
+            className={`button-primary record-edit-save save-feedback-button save-feedback-button-${st}`}
+            disabled={st === 'saving'}
+            onClick={() => {
+              if (!confirmUnusualMealCalories([{ name: draft.name.trim(), calories: Number(draft.calories) || 0 }])) return;
+              void runSave('favorite-form', saveFavoriteForm);
+            }}
+          >
+            {st === 'saving' ? '保存中...' : st === 'error' ? '保存に失敗しました' : '保存'}
+          </button>
+          <button type="button" className="button-secondary record-edit-cancel" disabled={st === 'saving'} onClick={closeFavoriteForm}>
+            キャンセル
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const removeFavorite = async (id: string) => {
+    if (favoritesSource !== 'db') {
+      setFavoritesMessage('定番食品のデータベースが使えないため削除できません。');
+      return;
+    }
     if (!window.confirm('この定番食品を削除しますか？')) {
       return;
     }
-    setFavorites(favorites.filter((f) => f.id !== id));
-    setStatusMessage('定番食品を削除しました。');
+    // Soft delete, so the one-time migration on another device cannot re-add it.
+    const { data, error } = await supabase
+      .from('favorite_foods')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id');
+    if (error || !data || data.length === 0) {
+      console.error('[favorites] delete failed', error);
+      setFavoritesMessage(`定番食品の削除に失敗しました: ${error ? formatSupabaseError(error) : '画面を再読み込みしてお試しください'}`);
+      return;
+    }
+    setFavorites((prev) => prev.filter((f) => f.id !== id));
+    setFavoritesMessage('');
+    if (favoriteFormTarget === id) {
+      closeFavoriteForm();
+    }
   };
 
   const removeRecord = (id: string) => {
@@ -2035,10 +2450,10 @@ export default function HomePage() {
     }
 
     // Blank nutrient fields count as 0; anything non-numeric or negative is rejected.
-    const parseAmount = (raw: string) => {
+    const parseAmount = (raw: string, round: (n: number) => number = round1) => {
       if (!raw.trim()) return 0;
       const value = Number(raw);
-      return Number.isFinite(value) && value >= 0 ? round1(value) : null;
+      return Number.isFinite(value) && value >= 0 ? round(value) : null;
     };
 
     const calories = parseAmount(draft.calories);
@@ -2056,7 +2471,7 @@ export default function HomePage() {
       const protein = parseAmount(draft.protein);
       const fat = parseAmount(draft.fat);
       const carbs = parseAmount(draft.carbs);
-      const salt = parseAmount(draft.salt);
+      const salt = parseAmount(draft.salt, round2);
       const phosphorus = parseAmount(draft.phosphorus);
       if (protein == null || fat == null || carbs == null || salt == null || phosphorus == null) {
         setRecordEditMessage('栄養素の値を正しく入力してください。');
@@ -2147,7 +2562,7 @@ export default function HomePage() {
               {numberField('protein', 'P(g)', '0.1')}
               {numberField('fat', 'F(g)', '0.1')}
               {numberField('carbs', 'C(g)', '0.1')}
-              {numberField('salt', '塩分(g)', '0.1')}
+              {numberField('salt', '食塩相当量(g)', '0.01')}
               {numberField('phosphorus', 'リン(mg)', '1')}
             </>
           )}
@@ -2188,7 +2603,7 @@ export default function HomePage() {
       protein: round1(record.protein * ratio),
       fat: round1(record.fat * ratio),
       carbs: round1(record.carbs * ratio),
-      salt: round1(record.salt * ratio),
+      salt: round2(record.salt * ratio),
       phosphorus: round1(record.phosphorus * ratio),
     };
   };
@@ -2621,27 +3036,39 @@ export default function HomePage() {
         <div className="page-card">
           <h2 className="section-title">マイ定番食品</h2>
           <p>よく使う組成が固定された食品を登録して、ワンタップで記録できます。</p>
-          <div className="field-grid field-grid-2">
-            <label>
-              新しい定番食品名
-              <input value={favoriteName} onChange={(e) => setFavoriteName(e.target.value)} placeholder="例: おにぎり" />
-            </label>
-            <button className="button-secondary" type="button" onClick={addFavorite}>
-              定番食品に追加
-            </button>
-          </div>
+          <button
+            className="button-secondary"
+            type="button"
+            disabled={favoritesSource !== 'db' || favoriteFormTarget === 'new'}
+            onClick={() => openFavoriteForm()}
+          >
+            ＋ 新しい定番食品
+          </button>
+          {favoriteFormTarget === 'new' ? renderFavoriteForm() : null}
+          {favoritesMessage ? <p><small className="weekly-summary-error">{favoritesMessage}</small></p> : null}
+          {favoritesSource === 'loading' ? <p><small>定番食品を読み込み中...</small></p> : null}
           <div className="card-row">
             {favorites.map((favorite) => (
               <div key={favorite.id} className="favorite-item">
                 <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
                   {favorite.name}
                 </button>
-                <button className="button-danger record-delete" type="button" aria-label="削除" onClick={() => removeFavorite(favorite.id)}>
+                <button
+                  className="button-secondary favorite-edit"
+                  type="button"
+                  aria-label={`${favorite.name}を編集`}
+                  disabled={favoritesSource !== 'db' || favoriteFormTarget === favorite.id}
+                  onClick={() => openFavoriteForm(favorite)}
+                >
+                  編集
+                </button>
+                <button className="button-danger record-delete" type="button" aria-label="削除" disabled={favoritesSource !== 'db'} onClick={() => { void removeFavorite(favorite.id); }}>
                   ×
                 </button>
               </div>
             ))}
           </div>
+          {favoriteFormTarget && favoriteFormTarget !== 'new' ? renderFavoriteForm() : null}
         </div>
 
         <div className="page-card">
@@ -2689,6 +3116,9 @@ export default function HomePage() {
                       <input value={estimate.amountText} onChange={(e) => updateEstimateAmountText(estimate.tempId, e.target.value)} />
                     </label>
                   </div>
+                  {estimate.mode === 'label' ? (
+                    <p className="estimate-section-label">読み取った値（{estimate.amountText}）</p>
+                  ) : null}
                   <div className="estimate-nutrients-grid">
                     <label className="estimate-inline-field">
                       <span>kcal</span>
@@ -2707,8 +3137,8 @@ export default function HomePage() {
                       <input type="number" value={estimate.baseCarbs} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
                     </label>
                     <label className="estimate-inline-field">
-                      <span>塩(g)</span>
-                      <input type="number" step="0.1" value={estimate.baseSalt} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
+                      <span>食塩相当量(g)</span>
+                      <input type="number" step="0.01" value={estimate.baseSalt} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
                     </label>
                     <label className="estimate-inline-field">
                       <span>リン(mg)</span>
@@ -2727,6 +3157,47 @@ export default function HomePage() {
                       />
                     </label>
                   </div>
+                  {estimate.mode === 'label' ? (
+                    <div className="estimate-label-notes">
+                      {estimate.saltSource === 'sodium' ? (
+                        <small>
+                          食塩相当量: ラベルのナトリウム {estimate.sodiumMg}mg から換算しました（ナトリウムmg × 2.54 ÷ 1000）。
+                        </small>
+                      ) : estimate.saltSource === 'missing' ? (
+                        <small className="estimate-label-warning">
+                          ラベルに食塩相当量・ナトリウムの表示が見つかりませんでした。必要なら食塩相当量(g)を入力してください。
+                        </small>
+                      ) : (
+                        <small>食塩相当量: ラベルの表示どおりです。</small>
+                      )}
+                      {isSuspiciousLabelSalt(estimate) ? (
+                        <small className="estimate-label-warning">
+                          食塩相当量が100gあたり{SUSPICIOUS_SALT_PER_100G}gを超えています。ナトリウム(mg)の値を食塩相当量(g)として読み取っていないか確認してください。
+                        </small>
+                      ) : null}
+                      {!isWeightUnit(estimate.baseUnit) ? (
+                        <label className="estimate-inline-field estimate-base-weight">
+                          <span>「{estimate.amountText}」の重さ</span>
+                          <span className="estimate-base-weight-input">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              inputMode="decimal"
+                              value={estimate.baseWeight ?? ''}
+                              placeholder="未入力"
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => {
+                                const value = Number(e.target.value);
+                                updateEstimate(estimate.tempId, { baseWeight: e.target.value && value > 0 ? value : null });
+                              }}
+                            />
+                            {estimate.baseWeightUnit ?? 'g'}
+                          </span>
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="estimate-actual-amount">
                     <span className="estimate-actual-label">実際に食べた量</span>
                     <div className="estimate-actual-controls">
@@ -2748,14 +3219,56 @@ export default function HomePage() {
                         ))}
                       </select>
                     </div>
-                    <small className="estimate-actual-hint">
-                      上の栄養値「{estimate.baseAmount}{estimate.baseUnit}あたり」を基準に自動換算（現在 ×{estimate.multiplier}）
-                    </small>
+                    {estimate.conversionError ? (
+                      <small className="estimate-label-warning">
+                        {isWeightUnit(estimate.actualUnit)
+                          ? `「${estimate.amountText}」の重さを上に入力すると、${estimate.actualUnit}で換算できます。`
+                          : `この表示は「${estimate.amountText}」なので、食べた量は g か ml で入力してください。`}
+                      </small>
+                    ) : (
+                      <small className="estimate-actual-hint">
+                        上の栄養値「{estimate.mode === 'label' ? estimate.amountText : `${estimate.baseAmount}${estimate.baseUnit}あたり`}」を基準に自動換算（現在 ×{estimate.multiplier}）
+                      </small>
+                    )}
                   </div>
                   <div className="summary-item" style={{ marginTop: 8 }}>
-                    <span>再計算後</span>
-                    <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 塩 {estimate.salt.toFixed(1)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
+                    <span>{estimate.mode === 'label' ? `換算結果（${estimate.actualAmount}${estimate.actualUnit}）` : '再計算後'}</span>
+                    {estimate.conversionError ? (
+                      <strong className="estimate-label-warning">換算できません</strong>
+                    ) : (
+                      <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 食塩 {estimate.salt.toFixed(2)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
+                    )}
                   </div>
+                  {estimate.mode === 'label' ? (() => {
+                    const st = saveStates[`label-favorite-${estimate.tempId}`] ?? 'idle';
+                    return (
+                      <div className="estimate-favorite">
+                        <label className="record-edit-field">
+                          <span>定番食品の名前</span>
+                          <input
+                            value={labelFavoriteNames[estimate.tempId] ?? defaultLabelFavoriteName(estimate)}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setLabelFavoriteNames((prev) => ({ ...prev, [estimate.tempId]: value }));
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className={`button-secondary save-feedback-button save-feedback-button-${st}`}
+                          disabled={st === 'saving' || estimate.conversionError || favoritesSource !== 'db'}
+                          onClick={() => {
+                            const name = labelFavoriteNames[estimate.tempId] ?? defaultLabelFavoriteName(estimate);
+                            if (!confirmUnusualMealCalories([{ name, calories: estimate.calories }])) return;
+                            void runSave(`label-favorite-${estimate.tempId}`, () => registerLabelEstimateAsFavorite(estimate));
+                          }}
+                        >
+                          {st === 'saving' ? '登録中...' : st === 'success' ? '✓ 登録しました' : st === 'error' ? '登録に失敗しました' : '定番食品に登録'}
+                        </button>
+                        <small>換算結果（{estimate.actualAmount}{estimate.actualUnit}）の値で登録します。食事の記録にはなりません。</small>
+                      </div>
+                    );
+                  })() : null}
                 </div>
               ))}
             </div>
@@ -2766,12 +3279,16 @@ export default function HomePage() {
                   className={`button-primary save-feedback-button save-feedback-button-${st}`}
                   type="button"
                   onClick={() => {
+                    if (estimates.some((estimate) => estimate.conversionError)) {
+                      setStatusMessage('量を換算できない推定結果があります。各カードの案内に沿って入力してください。');
+                      return;
+                    }
                     if (!confirmUnusualMealCalories(estimates)) return;
                     void runSave('meal', saveAllEstimates);
                   }}
                   disabled={st === 'saving'}
                 >
-                  {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : '保存する'}
+                  {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : `${formatMonthDay(dateFilter)}の食事として保存`}
                 </button>
               );
             })()}
