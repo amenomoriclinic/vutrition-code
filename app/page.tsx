@@ -623,6 +623,8 @@ export default function HomePage() {
   // null: form closed, 'new': adding, otherwise the id of the favorite being edited.
   const [favoriteFormTarget, setFavoriteFormTarget] = useState<string | null>(null);
   const [favoriteDraft, setFavoriteDraft] = useState<FavoriteDraft | null>(null);
+  // Name typed for registering a label estimate as a favorite, by estimate tempId.
+  const [labelFavoriteNames, setLabelFavoriteNames] = useState<Record<string, string>>({});
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
@@ -2240,6 +2242,54 @@ export default function HomePage() {
     return true;
   };
 
+  // "豆腐 250g": the label's product name plus the amount it was converted to.
+  const defaultLabelFavoriteName = (estimate: EditableEstimate) =>
+    `${estimate.name} ${estimate.actualAmount}${estimate.actualUnit}`.trim();
+
+  // Registers a label estimate, converted to the eaten amount, as a favorite. The
+  // label's per-base values go into labelBase for recording other amounts later.
+  const registerLabelEstimateAsFavorite = async (estimate: EditableEstimate): Promise<boolean> => {
+    if (estimate.conversionError) {
+      setStatusMessage('量を換算できないため登録できません。カードの案内に沿って入力してください。');
+      return false;
+    }
+    const name = (labelFavoriteNames[estimate.tempId] ?? defaultLabelFavoriteName(estimate)).trim();
+    if (!name) {
+      setStatusMessage('定番食品の名前を入力してください。');
+      return false;
+    }
+    const saved = await insertFavorite({
+      id: '',
+      name,
+      amountText: `${estimate.actualAmount}${estimate.actualUnit}`,
+      calories: round1(estimate.calories),
+      protein: round1(estimate.protein),
+      fat: round1(estimate.fat),
+      carbs: round1(estimate.carbs),
+      salt: round2(estimate.salt),
+      phosphorus: round1(estimate.phosphorus),
+      phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(estimate.phosphorusAbsorptionRate),
+      labelBase: {
+        amountText: estimate.amountText,
+        amount: estimate.baseAmount,
+        unit: estimate.baseUnit,
+        weight: estimate.baseWeight,
+        calories: estimate.baseCalories,
+        protein: estimate.baseProtein,
+        fat: estimate.baseFat,
+        carbs: estimate.baseCarbs,
+        salt: estimate.baseSalt,
+        phosphorus: estimate.basePhosphorus,
+      },
+    });
+    if (!saved) {
+      setStatusMessage('定番食品に登録できませんでした。「マイ定番食品」のメッセージを確認してください。');
+      return false;
+    }
+    setStatusMessage(`「${saved.name}」を定番食品に登録しました。`);
+    return true;
+  };
+
   const renderFavoriteForm = () => {
     if (!favoriteFormTarget || !favoriteDraft) return null;
     const draft = favoriteDraft;
@@ -3183,6 +3233,36 @@ export default function HomePage() {
                       <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 食塩 {estimate.salt.toFixed(2)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
                     )}
                   </div>
+                  {estimate.mode === 'label' ? (() => {
+                    const st = saveStates[`label-favorite-${estimate.tempId}`] ?? 'idle';
+                    return (
+                      <div className="estimate-favorite">
+                        <label className="record-edit-field">
+                          <span>定番食品の名前</span>
+                          <input
+                            value={labelFavoriteNames[estimate.tempId] ?? defaultLabelFavoriteName(estimate)}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setLabelFavoriteNames((prev) => ({ ...prev, [estimate.tempId]: value }));
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className={`button-secondary save-feedback-button save-feedback-button-${st}`}
+                          disabled={st === 'saving' || estimate.conversionError || favoritesSource !== 'db'}
+                          onClick={() => {
+                            const name = labelFavoriteNames[estimate.tempId] ?? defaultLabelFavoriteName(estimate);
+                            if (!confirmUnusualMealCalories([{ name, calories: estimate.calories }])) return;
+                            void runSave(`label-favorite-${estimate.tempId}`, () => registerLabelEstimateAsFavorite(estimate));
+                          }}
+                        >
+                          {st === 'saving' ? '登録中...' : st === 'success' ? '✓ 登録しました' : st === 'error' ? '登録に失敗しました' : '定番食品に登録'}
+                        </button>
+                        <small>換算結果（{estimate.actualAmount}{estimate.actualUnit}）の値で登録します。食事の記録にはなりません。</small>
+                      </div>
+                    );
+                  })() : null}
                 </div>
               ))}
             </div>
@@ -3202,7 +3282,7 @@ export default function HomePage() {
                   }}
                   disabled={st === 'saving'}
                 >
-                  {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : '保存する'}
+                  {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : `${formatMonthDay(dateFilter)}の食事として保存`}
                 </button>
               );
             })()}

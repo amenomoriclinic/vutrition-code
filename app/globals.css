@@ -722,6 +722,20 @@ small {
   font-weight: 700;
 }
 
+.estimate-favorite {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px dashed #99f6e4;
+  border-radius: 12px;
+  background: #f0fdfa;
+}
+
+.estimate-favorite small {
+  color: #475569;
+}
+
 .estimate-base-weight-input {
   display: inline-flex;
   align-items: center;
