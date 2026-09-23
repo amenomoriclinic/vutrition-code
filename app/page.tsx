@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
+import FloatingButton from './components/FloatingButton';
 import HealthTrendChart, { HealthTrendRange } from './components/HealthTrendChart';
 import { getDRI } from '../lib/dri';
 
@@ -407,6 +409,34 @@ const formatMonthDay = (date: string) => {
   return month && day ? `${Number(month)}/${Number(day)}` : date;
 };
 
+// '2026-09-22' + 1 → '2026-09-23' (pure calendar arithmetic, no timezone involved)
+const shiftDateString = (date: string, days: number) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+// The page is split into screens that are switched in place; the current one is
+// kept in the URL hash so the browser/phone back action returns to the previous one.
+type AppView = 'home' | 'meal' | 'exercise' | 'health' | 'summary' | 'settings';
+
+const APP_VIEWS: Array<{ id: AppView; icon: string; label: string }> = [
+  { id: 'home', icon: '🏠', label: 'ホーム' },
+  { id: 'meal', icon: '🍚', label: '食事' },
+  { id: 'exercise', icon: '🏃', label: '運動' },
+  { id: 'health', icon: '❤️', label: '健康' },
+  { id: 'summary', icon: '📊', label: '集計' },
+  { id: 'settings', icon: '⚙️', label: '設定' },
+];
+
+// 設定 is opened from the home tiles only, so the tab bar keeps five large targets.
+const TAB_VIEWS: AppView[] = ['home', 'meal', 'exercise', 'health', 'summary'];
+
+const parseViewHash = (hash: string): AppView => {
+  const id = hash.replace(/^#/, '');
+  return APP_VIEWS.some((v) => v.id === id) ? (id as AppView) : 'home';
+};
+
 // Per-entry calories above these are almost always typos (e.g. 400 → 4000).
 // They are not blocked: the user is asked to confirm before saving.
 const UNUSUAL_EXERCISE_KCAL = 2000;
@@ -442,6 +472,10 @@ export default function HomePage() {
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
   const [profile, setProfile] = useState({ age: 35, sex: 'male' as Sex, weight: 60, activity: 'moderate' as ActivityLevel });
   const [dateFilter, setDateFilter] = useState(toJstDateString());
+  // Today's date when the app was last in the foreground; used to jump back to
+  // today when the app is resumed on a later day.
+  const lastSeenTodayRef = useRef(toJstDateString());
+  const [view, setView] = useState<AppView>('home');
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [favoriteName, setFavoriteName] = useState('');
@@ -693,6 +727,32 @@ export default function HomePage() {
     if (!healthTrendOpen) return;
     void loadHealthTrend(healthTrendRange);
   }, [healthTrendRange, healthTrendOpen]);
+
+  useEffect(() => {
+    const syncView = () => setView(parseViewHash(window.location.hash));
+    syncView();
+    window.addEventListener('hashchange', syncView);
+    return () => window.removeEventListener('hashchange', syncView);
+  }, []);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [view]);
+
+  // A phone keeps the app alive in the background, so "opening" it the next day is
+  // only a resume: start from today again once the calendar day has changed.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const today = toJstDateString();
+      if (today !== lastSeenTodayRef.current) {
+        lastSeenTodayRef.current = today;
+        setDateFilter(today);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   // The health form edits the record of the selected date.
   useEffect(() => {
@@ -2336,865 +2396,994 @@ export default function HomePage() {
     resetBulkRecordSaveStateAfterDelay();
   };
 
+  const navigate = (next: AppView) => {
+    if (next === view) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // The hashchange listener switches the view.
+    window.location.hash = next === 'home' ? '' : next;
+  };
+
+  const todayJst = toJstDateString();
+  const isTodaySelected = dateFilter === todayJst;
+
+  const shiftSelectedDate = (days: number) => {
+    const next = shiftDateString(dateFilter, days);
+    setDateFilter(next > todayJst ? todayJst : next);
+  };
+
+  // From any screen the ＋ button opens the meal screen and the photo picker. The
+  // picker may only be opened during the tap itself, so the meal screen and its photo
+  // input are rendered synchronously before clicking it.
+  const handleFabPress = () => {
+    flushSync(() => {
+      if (scanMode === 'text') setScanMode('food');
+      setView('meal');
+    });
+    if (window.location.hash !== '#meal') {
+      window.location.hash = 'meal';
+    }
+    document.getElementById('meal-photo-upload')?.click();
+  };
+
+  const currentViewLabel = APP_VIEWS.find((v) => v.id === view)?.label ?? '';
+
   return (
-    <main>
-      <div className="page-card">
-        <h1 className="section-title">栄養管理アプリ</h1>
-        <p>スマホで食事写真をアップロードし、Claude Visionで栄養を推定して記録します。</p>
-        <p>500円玉を基準物として写すと量推定の精度が上がります。</p>
-      </div>
-
-      <div className="page-card">
-        <h2 className="section-title">食事記録</h2>
-        <div className="field-grid">
-          <div>
-            <div className="scan-mode-tabs" role="tablist" aria-label="食事記録モード">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scanMode === 'food'}
-                className={`scan-mode-tab ${scanMode === 'food' ? 'is-active' : ''}`}
-                onClick={() => setScanMode('food')}
-              >
-                料理写真
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scanMode === 'label'}
-                className={`scan-mode-tab ${scanMode === 'label' ? 'is-active' : ''}`}
-                onClick={() => setScanMode('label')}
-              >
-                栄養表示ラベル
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scanMode === 'text'}
-                className={`scan-mode-tab ${scanMode === 'text' ? 'is-active' : ''}`}
-                onClick={() => setScanMode('text')}
-              >
-                テキスト入力
-              </button>
-            </div>
-            <small>
-              {scanMode === 'food'
-                ? '料理全体を撮影して栄養推定します。'
-                : scanMode === 'label'
-                  ? 'パッケージの栄養表示を撮影して数値を読み取ります。'
-                  : '食品名だけで推定できます。写真なしでも入力内容から類推します。'}
-            </small>
+    <>
+    <main className="app-main">
+      <header className={`app-bar${isTodaySelected ? '' : ' app-bar-past'}`}>
+        <div className="app-bar-row">
+          {view !== 'home' ? (
+            <button type="button" className="app-bar-home" aria-label="ホームへ" onClick={() => navigate('home')}>
+              ←
+            </button>
+          ) : null}
+          <strong className="app-bar-title">{currentViewLabel}</strong>
+          <div className="app-bar-date">
+            <button type="button" className="app-bar-step" aria-label="前の日" onClick={() => shiftSelectedDate(-1)}>
+              ‹
+            </button>
+            <input
+              className="app-bar-date-input"
+              type="date"
+              aria-label="日付を選択"
+              value={dateFilter}
+              max={todayJst}
+              onChange={(e) => {
+                if (e.target.value) setDateFilter(e.target.value);
+              }}
+            />
+            <button
+              type="button"
+              className="app-bar-step"
+              aria-label="次の日"
+              disabled={isTodaySelected}
+              onClick={() => shiftSelectedDate(1)}
+            >
+              ›
+            </button>
           </div>
-
-          {scanMode !== 'text' ? (
-            <div className="camera-upload-field">
-              <span className="camera-upload-label">写真</span>
-              <input
-                id="meal-photo-upload"
-                className="camera-upload-input"
-                type="file"
-                accept="image/*"
-                capture="environment"
-                multiple
-                onChange={handlePhotoChange}
-              />
-              <label className="camera-upload-button" htmlFor="meal-photo-upload">📷 撮影・選択</label>
-            </div>
-          ) : null}
-
-          {scanMode === 'text' ? (
-            <>
-              <label>
-                食品名・料理名
-                <input value={textFoodName} onChange={(e) => setTextFoodName(e.target.value)} placeholder="例: ざるそば1人前 / バナナ1本 / マクドナルド ビッグマック" />
-              </label>
-              <label>
-                量（任意）
-                <input value={textFoodAmount} onChange={(e) => setTextFoodAmount(e.target.value)} placeholder="例: 1人前、2個、Mサイズ" />
-              </label>
-            </>
-          ) : null}
-
-          {photoPreviews.length > 0 ? (
-            <div className="card-row">
-              {photoPreviews.map((src, idx) => (
-                <img key={`${src}-${idx}`} className="image-preview" src={src} alt={`preview-${idx + 1}`} style={{ maxWidth: 140 }} />
-              ))}
-            </div>
-          ) : null}
-
-          <label>
-            店名・商品名・メーカー名など(任意)
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例: ガスト チーズINハンバーグ" />
-          </label>
-
-          <button
-            className={`button-secondary add-food-button add-food-button-${addFoodState}`}
-            type="button"
-            disabled={addFoodState === 'saving'}
-            onClick={() => {
-              void addPendingFood();
-            }}
-          >
-            {addFoodState === 'saving'
-              ? '保存中...'
-              : addFoodState === 'success'
-                ? `✓ ${addFoodCount}件を追加しました`
-                : addFoodState === 'error'
-                  ? '保存に失敗しました'
-                  : '食品を追加'}
-          </button>
         </div>
-      </div>
-
-      <div className="page-card">
-        <h2 className="section-title">マイ定番食品</h2>
-        <p>よく使う組成が固定された食品を登録して、ワンタップで記録できます。</p>
-        <div className="field-grid field-grid-2">
-          <label>
-            新しい定番食品名
-            <input value={favoriteName} onChange={(e) => setFavoriteName(e.target.value)} placeholder="例: おにぎり" />
-          </label>
-          <button className="button-secondary" type="button" onClick={addFavorite}>
-            定番食品に追加
-          </button>
-        </div>
-        <div className="card-row">
-          {favorites.map((favorite) => (
-            <div key={favorite.id} className="favorite-item">
-              <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
-                {favorite.name}
-              </button>
-              <button className="button-danger record-delete" type="button" aria-label="削除" onClick={() => removeFavorite(favorite.id)}>
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="page-card">
-        <h2 className="section-title">推定待ち食品リスト</h2>
-        {pendingFoods.length === 0 ? (
-          <p><small>まだ食品が追加されていません。上の「食品を追加」ボタンから登録してください。</small></p>
-        ) : (
-          <div className="field-grid">
-            {pendingFoods.map((item) => (
-              <div key={item.id} className="pending-row">
-                <div className="pending-main">
-                  <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
-                  <small>{item.mode === 'label' ? '栄養ラベル（表示単位はClaudeが自動判定 / 実際に食べた量は推定結果で調整）' : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
-                </div>
-              </div>
-            ))}
+        {isTodaySelected ? null : (
+          <div className="app-bar-warning">
+            <span>⚠ {formatMonthDay(dateFilter)}の記録を表示中（今日ではありません）</span>
+            <button type="button" className="app-bar-today" onClick={() => setDateFilter(todayJst)}>
+              今日に戻る
+            </button>
           </div>
         )}
-        <button className="button-primary" type="button" onClick={handleEstimate} disabled={loading}>
-          {loading ? '推定中...' : `推定開始（${pendingFoods.length}件）`}
-        </button>
-        {statusMessage ? <p><small>{statusMessage}</small></p> : null}
-      </div>
+      </header>
 
-      {estimates.length > 0 ? (
+      <section className="app-view" hidden={view !== 'home'}>
         <div className="page-card">
-          <h2 className="section-title">推定結果の確認と修正（{estimates.length}件）</h2>
+          <h1 className="section-title">栄養管理アプリ</h1>
+          <p>スマホで食事写真をアップロードし、Claude Visionで栄養を推定して記録します。</p>
+          <p>500円玉を基準物として写すと量推定の精度が上がります。</p>
+        </div>
+
+          <div className="home-tiles">
+            {([
+              { id: 'meal', value: `${totals.calories.toFixed(0)} kcal` },
+              { id: 'exercise', value: `-${exerciseCalories.toFixed(0)} kcal` },
+              { id: 'health', value: healthForDate?.weight != null ? `${healthForDate.weight.toFixed(1)} kg` : '未記録' },
+              { id: 'summary', value: `差 ${(totals.calories - estimatedEnergy).toFixed(0)} kcal` },
+              { id: 'settings', value: 'プロフィール' },
+            ] as Array<{ id: AppView; value: string }>).map((tile) => {
+              const meta = APP_VIEWS.find((v) => v.id === tile.id);
+              return (
+                <button
+                  key={tile.id}
+                  type="button"
+                  className={`home-tile home-tile-${tile.id}`}
+                  onClick={() => navigate(tile.id)}
+                >
+                  <span className="home-tile-icon" aria-hidden="true">{meta?.icon}</span>
+                  <span className="home-tile-label">{meta?.label}</span>
+                  <span className="home-tile-value">{tile.value}</span>
+                </button>
+              );
+            })}
+          </div>
+      </section>
+
+      <section className="app-view" hidden={view !== 'meal'}>
+        <div className="page-card">
+          <h2 className="section-title">食事記録</h2>
           <div className="field-grid">
-            {estimates.map((estimate) => (
-              <div key={estimate.tempId} className="page-card estimate-card" style={{ marginBottom: 8 }}>
-                <p><small>{estimate.fileName}</small></p>
-                <div className="estimate-media-row">
-                  {estimate.imageUrl ? <img className="image-preview estimate-image" src={estimate.imageUrl} alt={estimate.fileName} style={{ maxWidth: 220 }} /> : null}
-                  <button type="button" className="button-danger estimate-remove" onClick={() => removeEstimate(estimate.tempId)}>
-                    削除
-                  </button>
-                </div>
-                <div className="field-grid field-grid-2 estimate-meta-grid">
-                  <label>
-                    料理名
-                    <input value={estimate.name} onChange={(e) => updateEstimate(estimate.tempId, { name: e.target.value })} />
-                  </label>
-                  <label>
-                    推定量の表示
-                    <input value={estimate.amountText} onChange={(e) => updateEstimateAmountText(estimate.tempId, e.target.value)} />
-                  </label>
-                </div>
-                <div className="estimate-nutrients-grid">
-                  <label className="estimate-inline-field">
-                    <span>kcal</span>
-                    <input type="number" value={estimate.baseCalories} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCalories: Number(e.target.value) || 0 })} />
-                  </label>
-                  <label className="estimate-inline-field">
-                    <span>P(g)</span>
-                    <input type="number" value={estimate.baseProtein} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseProtein: Number(e.target.value) || 0 })} />
-                  </label>
-                  <label className="estimate-inline-field">
-                    <span>F(g)</span>
-                    <input type="number" value={estimate.baseFat} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseFat: Number(e.target.value) || 0 })} />
-                  </label>
-                  <label className="estimate-inline-field">
-                    <span>C(g)</span>
-                    <input type="number" value={estimate.baseCarbs} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
-                  </label>
-                  <label className="estimate-inline-field">
-                    <span>塩(g)</span>
-                    <input type="number" step="0.1" value={estimate.baseSalt} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
-                  </label>
-                  <label className="estimate-inline-field">
-                    <span>リン(mg)</span>
-                    <input type="number" step="1" value={estimate.basePhosphorus} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { basePhosphorus: Number(e.target.value) || 0 })} />
-                  </label>
-                  <label className="estimate-inline-field">
-                    <span>吸収率</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={estimate.phosphorusAbsorptionRate}
-                      onFocus={(e) => e.target.select()}
-                      onChange={(e) => updateEstimate(estimate.tempId, { phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(e.target.value)) })}
-                    />
-                  </label>
-                </div>
-                <div className="estimate-actual-amount">
-                  <span className="estimate-actual-label">実際に食べた量</span>
-                  <div className="estimate-actual-controls">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      inputMode="decimal"
-                      value={estimate.actualAmount}
-                      onFocus={(e) => e.target.select()}
-                      onChange={(e) => updateEstimate(estimate.tempId, { actualAmount: Number(e.target.value) || 0 })}
-                    />
-                    <select
-                      value={estimate.actualUnit}
-                      onChange={(e) => updateEstimate(estimate.tempId, { actualUnit: e.target.value as LabelAmountUnit })}
-                    >
-                      {actualUnitOptions.map((u) => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <small className="estimate-actual-hint">
-                    上の栄養値「{estimate.baseAmount}{estimate.baseUnit}あたり」を基準に自動換算（現在 ×{estimate.multiplier}）
-                  </small>
-                </div>
-                <div className="summary-item" style={{ marginTop: 8 }}>
-                  <span>再計算後</span>
-                  <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 塩 {estimate.salt.toFixed(1)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
-                </div>
+            <div>
+              <div className="scan-mode-tabs" role="tablist" aria-label="食事記録モード">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={scanMode === 'food'}
+                  className={`scan-mode-tab ${scanMode === 'food' ? 'is-active' : ''}`}
+                  onClick={() => setScanMode('food')}
+                >
+                  料理写真
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={scanMode === 'label'}
+                  className={`scan-mode-tab ${scanMode === 'label' ? 'is-active' : ''}`}
+                  onClick={() => setScanMode('label')}
+                >
+                  栄養表示ラベル
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={scanMode === 'text'}
+                  className={`scan-mode-tab ${scanMode === 'text' ? 'is-active' : ''}`}
+                  onClick={() => setScanMode('text')}
+                >
+                  テキスト入力
+                </button>
+              </div>
+              <small>
+                {scanMode === 'food'
+                  ? '料理全体を撮影して栄養推定します。'
+                  : scanMode === 'label'
+                    ? 'パッケージの栄養表示を撮影して数値を読み取ります。'
+                    : '食品名だけで推定できます。写真なしでも入力内容から類推します。'}
+              </small>
+            </div>
+
+            {scanMode !== 'text' ? (
+              <div className="camera-upload-field">
+                <span className="camera-upload-label">写真</span>
+                <input
+                  id="meal-photo-upload"
+                  className="camera-upload-input"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  onChange={handlePhotoChange}
+                />
+                <label className="camera-upload-button" htmlFor="meal-photo-upload">📷 撮影・選択</label>
+              </div>
+            ) : null}
+
+            {scanMode === 'text' ? (
+              <>
+                <label>
+                  食品名・料理名
+                  <input value={textFoodName} onChange={(e) => setTextFoodName(e.target.value)} placeholder="例: ざるそば1人前 / バナナ1本 / マクドナルド ビッグマック" />
+                </label>
+                <label>
+                  量（任意）
+                  <input value={textFoodAmount} onChange={(e) => setTextFoodAmount(e.target.value)} placeholder="例: 1人前、2個、Mサイズ" />
+                </label>
+              </>
+            ) : null}
+
+            {photoPreviews.length > 0 ? (
+              <div className="card-row">
+                {photoPreviews.map((src, idx) => (
+                  <img key={`${src}-${idx}`} className="image-preview" src={src} alt={`preview-${idx + 1}`} style={{ maxWidth: 140 }} />
+                ))}
+              </div>
+            ) : null}
+
+            <label>
+              店名・商品名・メーカー名など(任意)
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例: ガスト チーズINハンバーグ" />
+            </label>
+
+            <button
+              className={`button-secondary add-food-button add-food-button-${addFoodState}`}
+              type="button"
+              disabled={addFoodState === 'saving'}
+              onClick={() => {
+                void addPendingFood();
+              }}
+            >
+              {addFoodState === 'saving'
+                ? '保存中...'
+                : addFoodState === 'success'
+                  ? `✓ ${addFoodCount}件を追加しました`
+                  : addFoodState === 'error'
+                    ? '保存に失敗しました'
+                    : '食品を追加'}
+            </button>
+          </div>
+        </div>
+
+        <div className="page-card">
+          <h2 className="section-title">マイ定番食品</h2>
+          <p>よく使う組成が固定された食品を登録して、ワンタップで記録できます。</p>
+          <div className="field-grid field-grid-2">
+            <label>
+              新しい定番食品名
+              <input value={favoriteName} onChange={(e) => setFavoriteName(e.target.value)} placeholder="例: おにぎり" />
+            </label>
+            <button className="button-secondary" type="button" onClick={addFavorite}>
+              定番食品に追加
+            </button>
+          </div>
+          <div className="card-row">
+            {favorites.map((favorite) => (
+              <div key={favorite.id} className="favorite-item">
+                <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
+                  {favorite.name}
+                </button>
+                <button className="button-danger record-delete" type="button" aria-label="削除" onClick={() => removeFavorite(favorite.id)}>
+                  ×
+                </button>
               </div>
             ))}
           </div>
-          {(() => {
-            const st = saveStates['meal'] ?? 'idle';
-            return (
-              <button
-                className={`button-primary save-feedback-button save-feedback-button-${st}`}
-                type="button"
-                onClick={() => {
-                  if (!confirmUnusualMealCalories(estimates)) return;
-                  void runSave('meal', saveAllEstimates);
-                }}
-                disabled={st === 'saving'}
-              >
-                {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : '保存する'}
-              </button>
-            );
-          })()}
         </div>
-      ) : null}
 
         <div className="page-card">
-        <h2 className="section-title">運動記録</h2>
-        <div style={{display:'flex', gap:8, marginBottom:8}}>
-          <button type="button" onClick={() => setExerciseTab('run')} style={{padding:8, borderRadius:6, background: exerciseTab==='run' ? '#0b74de' : '#eee', color: exerciseTab==='run' ? '#fff' : '#000'}}>ランニング</button>
-          <button type="button" onClick={() => setExerciseTab('manual')} style={{padding:8, borderRadius:6, background: exerciseTab==='manual' ? '#0b74de' : '#eee', color: exerciseTab==='manual' ? '#fff' : '#000'}}>手動</button>
-          <button type="button" onClick={() => setExerciseTab('met')} style={{padding:8, borderRadius:6, background: exerciseTab==='met' ? '#0b74de' : '#eee', color: exerciseTab==='met' ? '#fff' : '#000'}}>筋トレ</button>
+          <h2 className="section-title">推定待ち食品リスト</h2>
+          {pendingFoods.length === 0 ? (
+            <p><small>まだ食品が追加されていません。上の「食品を追加」ボタンから登録してください。</small></p>
+          ) : (
+            <div className="field-grid">
+              {pendingFoods.map((item) => (
+                <div key={item.id} className="pending-row">
+                  <div className="pending-main">
+                    <strong>{item.mode === 'text' ? (item.foodName || item.fileName) : item.fileName}</strong>
+                    <small>{item.mode === 'label' ? '栄養ラベル（表示単位はClaudeが自動判定 / 実際に食べた量は推定結果で調整）' : item.mode === 'text' ? (item.foodAmount || '1人前') : '料理写真'}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <button className="button-primary" type="button" onClick={handleEstimate} disabled={loading}>
+            {loading ? '推定中...' : `推定開始（${pendingFoods.length}件）`}
+          </button>
+          {statusMessage ? <p><small>{statusMessage}</small></p> : null}
         </div>
-        <div>
-          {exerciseTab === 'run' && (() => {
-            const st = saveStates['exercise-run'] ?? 'idle';
-            return (
-            <div style={{display:'flex', gap:8, alignItems:'center'}}>
-              <input id="run-km" type="number" step="0.1" min="0" value={exerciseInputs.runKm} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, runKm: e.target.value }))} style={{width:120}} />
-              <button
-                type="button"
-                className={`button-primary save-feedback-button save-feedback-button-${st}`}
-                disabled={st === 'saving'}
-                onClick={() => {
-                  const km = Number(exerciseInputs.runKm);
-                  if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
-                  const caloriesBurned = Math.round(profile.weight * km * 1.036);
-                  if (!confirmUnusualExerciseCalories(caloriesBurned)) return;
-                  const insert: NutritionRecordInsert = { name: `ランニング ${km} km`, amount_text: null, calories: caloriesBurned, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
-                  void runSave('exercise-run', () => saveExerciseRecord(insert));
-                }}
-              >
-                {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
-              </button>
-            </div>
-            );
-          })()}
-          {exerciseTab === 'manual' && (() => {
-            const st = saveStates['exercise-manual'] ?? 'idle';
-            return (
-            <div style={{display:'flex', gap:8, alignItems:'center'}}>
-              <input id="manual-cal" type="number" step="1" min="0" value={exerciseInputs.manualKcal} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, manualKcal: e.target.value }))} style={{width:120}} />
-              <button
-                type="button"
-                className={`button-primary save-feedback-button save-feedback-button-${st}`}
-                disabled={st === 'saving'}
-                onClick={() => {
-                  const kcal = Math.round(Number(exerciseInputs.manualKcal));
-                  if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
-                  if (!confirmUnusualExerciseCalories(kcal)) return;
-                  const insert: NutritionRecordInsert = { name: `運動（手動）`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
-                  void runSave('exercise-manual', () => saveExerciseRecord(insert));
-                }}
-              >
-                {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
-              </button>
-            </div>
-            );
-          })()}
-          {exerciseTab === 'met' && (() => {
-            const st = saveStates['exercise-met'] ?? 'idle';
-            return (
-            <div style={{display:'flex', gap:8, alignItems:'center'}}>
-              <select id="met-select" value={exerciseInputs.met} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, met: e.target.value }))}>
-                <option value="3.5">軽め - MET 3.5</option>
-                <option value="6.0">強め - MET 6.0</option>
-                <option value="7.0">高強度 - MET 7.0</option>
-              </select>
-              <input id="met-min" type="number" min={1} value={exerciseInputs.metMinutes} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, metMinutes: e.target.value }))} style={{width:80}} />
-              <button
-                type="button"
-                className={`button-primary save-feedback-button save-feedback-button-${st}`}
-                disabled={st === 'saving'}
-                onClick={() => {
-                  const met = Number(exerciseInputs.met);
-                  const min = Number(exerciseInputs.metMinutes);
-                  if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
-                  const hours = min / 60;
-                  const kcal = Math.round(met * profile.weight * hours);
-                  if (!confirmUnusualExerciseCalories(kcal)) return;
-                  const insert: NutritionRecordInsert = { name: `筋トレ ${min}分`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: `MET ${met}`, image_url: null };
-                  void runSave('exercise-met', () => saveExerciseRecord(insert));
-                }}
-              >
-                {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
-              </button>
-            </div>
-            );
-          })()}
-        </div>
-      </div>
 
-      <div className="page-card">
-        <h2 className="section-title">毎日の健康記録</h2>
-        <div className="health-inline-grid">
-          {/* A div rather than a label: the change/confirm buttons must not become the label's control. */}
-          <div className="health-inline-field">
-            <div className="health-height-head">
-              <label htmlFor="health-height-input" className="health-height-label">身長cm</label>
-              {savedHeight != null && !heightEditing ? (
-                <button type="button" className="health-height-change" onClick={startHeightEdit}>
-                  変更
-                </button>
-              ) : null}
+        {estimates.length > 0 ? (
+          <div className="page-card">
+            <h2 className="section-title">推定結果の確認と修正（{estimates.length}件）</h2>
+            <div className="field-grid">
+              {estimates.map((estimate) => (
+                <div key={estimate.tempId} className="page-card estimate-card" style={{ marginBottom: 8 }}>
+                  <p><small>{estimate.fileName}</small></p>
+                  <div className="estimate-media-row">
+                    {estimate.imageUrl ? <img className="image-preview estimate-image" src={estimate.imageUrl} alt={estimate.fileName} style={{ maxWidth: 220 }} /> : null}
+                    <button type="button" className="button-danger estimate-remove" onClick={() => removeEstimate(estimate.tempId)}>
+                      削除
+                    </button>
+                  </div>
+                  <div className="field-grid field-grid-2 estimate-meta-grid">
+                    <label>
+                      料理名
+                      <input value={estimate.name} onChange={(e) => updateEstimate(estimate.tempId, { name: e.target.value })} />
+                    </label>
+                    <label>
+                      推定量の表示
+                      <input value={estimate.amountText} onChange={(e) => updateEstimateAmountText(estimate.tempId, e.target.value)} />
+                    </label>
+                  </div>
+                  <div className="estimate-nutrients-grid">
+                    <label className="estimate-inline-field">
+                      <span>kcal</span>
+                      <input type="number" value={estimate.baseCalories} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCalories: Number(e.target.value) || 0 })} />
+                    </label>
+                    <label className="estimate-inline-field">
+                      <span>P(g)</span>
+                      <input type="number" value={estimate.baseProtein} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseProtein: Number(e.target.value) || 0 })} />
+                    </label>
+                    <label className="estimate-inline-field">
+                      <span>F(g)</span>
+                      <input type="number" value={estimate.baseFat} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseFat: Number(e.target.value) || 0 })} />
+                    </label>
+                    <label className="estimate-inline-field">
+                      <span>C(g)</span>
+                      <input type="number" value={estimate.baseCarbs} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
+                    </label>
+                    <label className="estimate-inline-field">
+                      <span>塩(g)</span>
+                      <input type="number" step="0.1" value={estimate.baseSalt} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
+                    </label>
+                    <label className="estimate-inline-field">
+                      <span>リン(mg)</span>
+                      <input type="number" step="1" value={estimate.basePhosphorus} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { basePhosphorus: Number(e.target.value) || 0 })} />
+                    </label>
+                    <label className="estimate-inline-field">
+                      <span>吸収率</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={estimate.phosphorusAbsorptionRate}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => updateEstimate(estimate.tempId, { phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(e.target.value)) })}
+                      />
+                    </label>
+                  </div>
+                  <div className="estimate-actual-amount">
+                    <span className="estimate-actual-label">実際に食べた量</span>
+                    <div className="estimate-actual-controls">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        inputMode="decimal"
+                        value={estimate.actualAmount}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => updateEstimate(estimate.tempId, { actualAmount: Number(e.target.value) || 0 })}
+                      />
+                      <select
+                        value={estimate.actualUnit}
+                        onChange={(e) => updateEstimate(estimate.tempId, { actualUnit: e.target.value as LabelAmountUnit })}
+                      >
+                        {actualUnitOptions.map((u) => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <small className="estimate-actual-hint">
+                      上の栄養値「{estimate.baseAmount}{estimate.baseUnit}あたり」を基準に自動換算（現在 ×{estimate.multiplier}）
+                    </small>
+                  </div>
+                  <div className="summary-item" style={{ marginTop: 8 }}>
+                    <span>再計算後</span>
+                    <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 塩 {estimate.salt.toFixed(1)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
+                  </div>
+                </div>
+              ))}
             </div>
-            <input
-              id="health-height-input"
-              type="number"
-              step="0.1"
-              min="0"
-              value={heightLocked ? String(savedHeight) : healthForm.height}
-              disabled={heightLocked}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, height: e.target.value }))}
-            />
-            {heightEditing ? (
-              <div className="health-height-actions">
-                <button type="button" className="health-height-confirm" onClick={confirmHeightEdit}>
-                  確定
+            {(() => {
+              const st = saveStates['meal'] ?? 'idle';
+              return (
+                <button
+                  className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                  type="button"
+                  onClick={() => {
+                    if (!confirmUnusualMealCalories(estimates)) return;
+                    void runSave('meal', saveAllEstimates);
+                  }}
+                  disabled={st === 'saving'}
+                >
+                  {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : '保存する'}
                 </button>
-                <button type="button" className="health-height-cancel" onClick={cancelHeightEdit}>
-                  取消
+              );
+            })()}
+          </div>
+        ) : null}
+
+        <div className="page-card">
+          <h2 className="section-title">記録一覧</h2>
+          <div className="record-actions">
+            <button
+              type="button"
+              className={`button-secondary record-save-all record-save-all-${bulkRecordSaveState}`}
+              disabled={bulkRecordSaveState === 'saving'}
+              onClick={() => {
+                void saveAllRecordMultipliers();
+              }}
+            >
+              {bulkRecordSaveState === 'saving'
+                ? '保存中...'
+                : bulkRecordSaveState === 'success'
+                  ? `✓ ${bulkRecordSaveCount}件保存しました`
+                  : bulkRecordSaveState === 'error'
+                    ? '保存に失敗しました'
+                    : '全て保存'}
+            </button>
+          </div>
+          {filteredIntakeRecords.length === 0 ? (
+            <p>この日の記録はまだありません。</p>
+          ) : (
+            <div className="field-grid">
+              {filteredIntakeRecords.map((record) => (
+                <div key={record.id} className="record-row">
+                  <div className="record-head">
+                    <div className="record-main">
+                      <strong className="record-name">{record.name}</strong>
+                      <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
+                    </div>
+                    <label className="record-multiplier-field" aria-label="倍率入力">
+                      <span className="record-multiplier-prefix">x</span>
+                      <input
+                        type="number"
+                        min="0.1"
+                        step="0.1"
+                        inputMode="decimal"
+                        value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
+                        onChange={(e) => {
+                          handleRecordMultiplierInput(record.id, e.target.value);
+                        }}
+                      />
+                    </label>
+                    <button type="button" className="button-secondary record-edit" aria-label="編集" disabled={editingRecordId === record.id} onClick={() => startEditRecord(record)}>
+                      編集
+                    </button>
+                    <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
+                      削除
+                    </button>
+                  </div>
+                  {renderRecordEditForm(record)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="app-view" hidden={view !== 'exercise'}>
+          <div className="page-card">
+          <h2 className="section-title">運動記録</h2>
+          <div style={{display:'flex', gap:8, marginBottom:8}}>
+            <button type="button" onClick={() => setExerciseTab('run')} style={{padding:8, borderRadius:6, background: exerciseTab==='run' ? '#0b74de' : '#eee', color: exerciseTab==='run' ? '#fff' : '#000'}}>ランニング</button>
+            <button type="button" onClick={() => setExerciseTab('manual')} style={{padding:8, borderRadius:6, background: exerciseTab==='manual' ? '#0b74de' : '#eee', color: exerciseTab==='manual' ? '#fff' : '#000'}}>手動</button>
+            <button type="button" onClick={() => setExerciseTab('met')} style={{padding:8, borderRadius:6, background: exerciseTab==='met' ? '#0b74de' : '#eee', color: exerciseTab==='met' ? '#fff' : '#000'}}>筋トレ</button>
+          </div>
+          <div>
+            {exerciseTab === 'run' && (() => {
+              const st = saveStates['exercise-run'] ?? 'idle';
+              return (
+              <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                <input id="run-km" type="number" step="0.1" min="0" value={exerciseInputs.runKm} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, runKm: e.target.value }))} style={{width:120}} />
+                <button
+                  type="button"
+                  className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                  disabled={st === 'saving'}
+                  onClick={() => {
+                    const km = Number(exerciseInputs.runKm);
+                    if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
+                    const caloriesBurned = Math.round(profile.weight * km * 1.036);
+                    if (!confirmUnusualExerciseCalories(caloriesBurned)) return;
+                    const insert: NutritionRecordInsert = { name: `ランニング ${km} km`, amount_text: null, calories: caloriesBurned, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
+                    void runSave('exercise-run', () => saveExerciseRecord(insert));
+                  }}
+                >
+                  {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
                 </button>
               </div>
-            ) : null}
-          </div>
-          <label className="health-inline-field">
-            体重kg
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={healthForm.weight}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, weight: e.target.value }))}
-            />
-          </label>
-          <label className="health-inline-field">
-            体脂肪率%
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={healthForm.bodyFat}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, bodyFat: e.target.value }))}
-            />
-          </label>
-          <label className="health-inline-field">
-            BMI
-            <input
-              type="text"
-              value={(() => {
-                const weight = parseNullableNumber(healthForm.weight);
-                const height = heightLocked ? savedHeight : parseNullableNumber(healthForm.height);
-                const bmi = calcBmi(weight, height);
-                return bmi == null ? '' : bmi.toFixed(1);
-              })()}
-              readOnly
-            />
-          </label>
-          <label className="health-inline-field">
-            収縮期
-            <input
-              type="number"
-              step="1"
-              min="0"
-              value={healthForm.systolicBp}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, systolicBp: e.target.value }))}
-            />
-          </label>
-          <label className="health-inline-field">
-            拡張期
-            <input
-              type="number"
-              step="1"
-              min="0"
-              value={healthForm.diastolicBp}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, diastolicBp: e.target.value }))}
-            />
-          </label>
-          <label className="health-inline-field">
-            脈拍
-            <input
-              type="number"
-              step="1"
-              min="0"
-              value={healthForm.pulse}
-              onChange={(e) => setHealthForm((prev) => ({ ...prev, pulse: e.target.value }))}
-            />
-          </label>
-        </div>
-        {(() => {
-          const st = saveStates['health'] ?? 'idle';
-          const deleteSt = saveStates['health-delete'] ?? 'idle';
-          const dateLabel = formatMonthDay(dateFilter);
-          const isToday = dateFilter === toJstDateString();
-          const busy = healthForDateLoading || st === 'saving' || deleteSt === 'saving';
-          return (
-            <>
-              {isToday ? null : (
-                <p className="health-date-note">
-                  <small>今日以外の日（{dateLabel}）の記録を表示しています。日付は「日次集計」で変更できます。</small>
-                </p>
-              )}
-              <div className="health-actions">
+              );
+            })()}
+            {exerciseTab === 'manual' && (() => {
+              const st = saveStates['exercise-manual'] ?? 'idle';
+              return (
+              <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                <input id="manual-cal" type="number" step="1" min="0" value={exerciseInputs.manualKcal} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, manualKcal: e.target.value }))} style={{width:120}} />
                 <button
-                  className={`button-primary health-save-button save-feedback-button save-feedback-button-${st}`}
                   type="button"
-                  disabled={busy}
-                  onClick={() => { void runSave('health', saveDailyHealthRecord); }}
+                  className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                  disabled={st === 'saving'}
+                  onClick={() => {
+                    const kcal = Math.round(Number(exerciseInputs.manualKcal));
+                    if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
+                    if (!confirmUnusualExerciseCalories(kcal)) return;
+                    const insert: NutritionRecordInsert = { name: `運動（手動）`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
+                    void runSave('exercise-manual', () => saveExerciseRecord(insert));
+                  }}
                 >
-                  {st === 'saving'
-                    ? '記録中...'
-                    : st === 'success'
-                      ? '✓ 記録しました'
-                      : st === 'error'
-                        ? '記録に失敗しました'
-                        : `${dateLabel}${isToday ? '（今日）' : ''}の記録として保存`}
+                  {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
                 </button>
-                {healthForDate ? (
-                  <button
-                    className="button-danger health-delete-button"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      if (!window.confirm(`${dateLabel}の健康記録を削除しますか？`)) return;
-                      void runSave('health-delete', deleteHealthRecord);
-                    }}
-                  >
-                    {deleteSt === 'saving' ? '削除中...' : 'この日の記録を削除'}
+              </div>
+              );
+            })()}
+            {exerciseTab === 'met' && (() => {
+              const st = saveStates['exercise-met'] ?? 'idle';
+              return (
+              <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                <select id="met-select" value={exerciseInputs.met} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, met: e.target.value }))}>
+                  <option value="3.5">軽め - MET 3.5</option>
+                  <option value="6.0">強め - MET 6.0</option>
+                  <option value="7.0">高強度 - MET 7.0</option>
+                </select>
+                <input id="met-min" type="number" min={1} value={exerciseInputs.metMinutes} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, metMinutes: e.target.value }))} style={{width:80}} />
+                <button
+                  type="button"
+                  className={`button-primary save-feedback-button save-feedback-button-${st}`}
+                  disabled={st === 'saving'}
+                  onClick={() => {
+                    const met = Number(exerciseInputs.met);
+                    const min = Number(exerciseInputs.metMinutes);
+                    if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
+                    const hours = min / 60;
+                    const kcal = Math.round(met * profile.weight * hours);
+                    if (!confirmUnusualExerciseCalories(kcal)) return;
+                    const insert: NutritionRecordInsert = { name: `筋トレ ${min}分`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: `MET ${met}`, image_url: null };
+                    void runSave('exercise-met', () => saveExerciseRecord(insert));
+                  }}
+                >
+                  {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
+                </button>
+              </div>
+              );
+            })()}
+          </div>
+          {statusMessage ? <p><small>{statusMessage}</small></p> : null}
+        </div>
+
+        <div className="page-card">
+          <h2 className="section-title">運動記録の一覧</h2>
+          {filteredExerciseRecords.length === 0 ? (
+            <p>この日の運動記録はまだありません。</p>
+          ) : (
+            <div className="field-grid">
+              {filteredExerciseRecords.map((record) => (
+                <div key={record.id} className="record-row">
+                  <div className="record-head">
+                    <div className="record-main">
+                      <strong className="record-name">{record.name}</strong>
+                      <span className="record-kcal">-{record.calories.toFixed(0)} kcal</span>
+                    </div>
+                    <button type="button" className="button-secondary record-edit" aria-label="編集" disabled={editingRecordId === record.id} onClick={() => startEditRecord(record)}>
+                      編集
+                    </button>
+                    <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
+                      削除
+                    </button>
+                  </div>
+                  {renderRecordEditForm(record)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="app-view" hidden={view !== 'health'}>
+        <div className="page-card">
+          <h2 className="section-title">毎日の健康記録</h2>
+          <div className="health-inline-grid">
+            {/* A div rather than a label: the change/confirm buttons must not become the label's control. */}
+            <div className="health-inline-field">
+              <div className="health-height-head">
+                <label htmlFor="health-height-input" className="health-height-label">身長cm</label>
+                {savedHeight != null && !heightEditing ? (
+                  <button type="button" className="health-height-change" onClick={startHeightEdit}>
+                    変更
                   </button>
                 ) : null}
               </div>
-            </>
-          );
-        })()}
-        {healthStatusMessage ? <p><small>{healthStatusMessage}</small></p> : null}
-      </div>
-
-      <div className="page-card">
-        <h2 className="section-title">日次集計</h2>
-        <label className="date-filter-box">
-          <span className="date-filter-label">日付を選択</span>
-          <input className="date-filter-input" type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-        </label>
-        <div className="summary-item">
-          <span>総カロリー</span>
-          <strong>{totals.calories.toFixed(0)} kcal</strong>
-        </div>
-        <div className="summary-item">
-          <span>タンパク質</span>
-          <strong>{totals.protein.toFixed(1)} g</strong>
-        </div>
-        <div className="summary-item">
-          <span>脂質</span>
-          <strong>{totals.fat.toFixed(1)} g</strong>
-        </div>
-        <div className="summary-item">
-          <span>炭水化物</span>
-          <strong>{totals.carbs.toFixed(1)} g</strong>
-        </div>
-        <div className="summary-item">
-          <span>食塩相当量</span>
-          <strong>{totals.salt.toFixed(1)} g</strong>
-        </div>
-        <div className="summary-item">
-          <span>体重</span>
-          <strong>{healthForDate?.weight != null ? `${healthForDate.weight.toFixed(1)} kg` : '未記録'}</strong>
-        </div>
-        <div className="summary-item">
-          <span>血圧</span>
-          <strong>{healthForDate?.systolicBp != null && healthForDate?.diastolicBp != null ? `${healthForDate.systolicBp}/${healthForDate.diastolicBp} mmHg` : '未記録'}</strong>
-        </div>
-        <div className="summary-item">
-          <span>吸収リン合計</span>
-          <strong>{totals.absorbedPhosphorus.toFixed(1)} mg（目安上限 {phosphorusUpperLimit}mg）</strong>
-        </div>
-        {totals.absorbedPhosphorus >= phosphorusWarningThreshold ? (
-          <p><small className="weekly-summary-error">リン摂取量が上限に近づいています</small></p>
-        ) : null}
-        <div className="summary-item">
-          <span>基礎代謝の目安</span>
-          <strong>{basalMetabolism.toFixed(0)} kcal</strong>
-        </div>
-        <div className="summary-item">
-          <span>運動による消費カロリー</span>
-          <strong>{exerciseCalories.toFixed(0)} kcal</strong>
-        </div>
-        <div className="summary-item">
-          <span>総消費カロリー（基礎代謝＋運動）</span>
-          <strong>{totalConsumptionCalories.toFixed(0)} kcal</strong>
-        </div>
-        <div className="summary-item">
-          <span>推定エネルギー必要量</span>
-          <strong>{estimatedEnergy.toFixed(0)} kcal</strong>
-        </div>
-        <div className="summary-item">
-          <span>推奨（DRI 2025 暫定）</span>
-          <strong>
-            {recommended.kcal} kcal / P:{recommended.protein}g 
-            F: {recommendedFatGrams}g 
-            C: {recommendedCarbsGrams}g 
-            Na: {recommended.salt}g
-          </strong>
-        </div>
-        <div className="summary-item">
-          <span>必要量との差</span>
-          <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
-        </div>
-        {(() => {
-          const st = saveStates['daily-note'] ?? 'idle';
-          return (
-            <div className="daily-note-box">
-              <label className="daily-note-label" htmlFor="daily-note-input">
-                その日の気づき・メモ
-              </label>
-              <textarea
-                id="daily-note-input"
-                className="daily-note-input"
-                rows={4}
-                value={dailyNote}
-                placeholder="体調・気づいたこと・食事の振り返りなど"
-                disabled={dailyNoteLoading}
-                onChange={(e) => setDailyNote(e.target.value)}
+              <input
+                id="health-height-input"
+                type="number"
+                step="0.1"
+                min="0"
+                value={heightLocked ? String(savedHeight) : healthForm.height}
+                disabled={heightLocked}
+                onChange={(e) => setHealthForm((prev) => ({ ...prev, height: e.target.value }))}
               />
-              <div className="daily-note-actions">
-                <button
-                  type="button"
-                  className={`button-secondary daily-note-save daily-note-save-${st}`}
-                  disabled={dailyNoteLoading || st === 'saving'}
-                  onClick={() => {
-                    void runSave('daily-note', saveDailyNote);
-                  }}
-                >
-                  {st === 'saving'
-                    ? '保存中...'
-                    : st === 'success'
-                      ? '✓ 保存しました'
-                      : st === 'error'
-                        ? '保存に失敗しました'
-                        : 'メモを保存'}
-                </button>
-                {dailyNoteMessage ? <small className="weekly-summary-error">{dailyNoteMessage}</small> : null}
-              </div>
-            </div>
-          );
-        })()}
-        {weeklySummary ? (
-          <div className="weekly-summary-card">
-            <div className="weekly-summary-header">
-              <h3 className="weekly-summary-title">先週のサマリー（{weeklySummary.periodStart} - {weeklySummary.periodEnd}）</h3>
-              <button
-                type="button"
-                className="button-secondary weekly-summary-close"
-                onClick={() => {
-                  setWeeklySummary(null);
-                  setWeeklySummaryError('');
-                }}
-              >
-                閉じる
-              </button>
-            </div>
-            <div className="weekly-summary-grid">
-              <div className="summary-item">
-                <span>平均カロリー</span>
-                <strong>{weeklySummary.averages.calories.toFixed(1)} kcal/日</strong>
-              </div>
-              <div className="summary-item">
-                <span>平均タンパク質</span>
-                <strong>{weeklySummary.averages.protein.toFixed(1)} g/日</strong>
-              </div>
-              <div className="summary-item">
-                <span>平均脂質</span>
-                <strong>{weeklySummary.averages.fat.toFixed(1)} g/日</strong>
-              </div>
-              <div className="summary-item">
-                <span>平均炭水化物</span>
-                <strong>{weeklySummary.averages.carbs.toFixed(1)} g/日</strong>
-              </div>
-              <div className="summary-item">
-                <span>平均食塩相当量</span>
-                <strong>{weeklySummary.averages.salt.toFixed(1)} g/日</strong>
-              </div>
-              <div className="summary-item">
-                <span>運動消費カロリー（7日合計）</span>
-                <strong>{weeklySummary.exerciseCaloriesTotal.toFixed(0)} kcal</strong>
-              </div>
-            </div>
-            <div className="weekly-summary-block">
-              <h4>Claude アドバイス</h4>
-              <p>{weeklySummary.analysis.overview}</p>
-            </div>
-            <div className="weekly-summary-block">
-              <h4>不足・過剰の栄養素</h4>
-              <ul>
-                {weeklySummary.analysis.nutrientComparison.map((item, idx) => (
-                  <li key={`nutrient-${idx}`}>{item.nutrient}: {item.status}（{item.comment}）</li>
-                ))}
-              </ul>
-            </div>
-            <div className="weekly-summary-block">
-              <h4>食事パターンの傾向</h4>
-              <ul>
-                {weeklySummary.analysis.patternInsights.map((item, idx) => (
-                  <li key={`pattern-${idx}`}>{item}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="weekly-summary-block">
-              <h4>改善のための具体的提案</h4>
-              <ul>
-                {weeklySummary.analysis.actionSuggestions.map((item, idx) => (
-                  <li key={`suggestion-${idx}`}>{item}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="weekly-summary-block">
-              <h4>体重・血圧の推移</h4>
-              {weeklySummary.analysis.healthTrend.length > 0 ? (
-                <ul>
-                  {weeklySummary.analysis.healthTrend.map((item, idx) => (
-                    <li key={`health-trend-${idx}`}>{item}</li>
-                  ))}
-                </ul>
-              ) : weeklySummary.healthRecords.length > 0 ? (
-                <ul>
-                  {weeklySummary.healthRecords.map((item) => (
-                    <li key={`health-row-${item.id}`}>{item.date}: 体重 {item.weight ?? '-'}kg / 血圧 {item.systolicBp ?? '-'}/{item.diastolicBp ?? '-'} / 脈拍 {item.pulse ?? '-'}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p>記録なし</p>
-              )}
-            </div>
-          </div>
-        ) : null}
-        <p><small>グラフの赤い棒は運動記録に入力した消費カロリーのみで、基礎代謝は含みません。</small></p>
-        <div className="chart-wrapper">
-          <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} totalConsumptionCalories={totalConsumptionCalories} date={dateFilter} />
-        </div>
-      </div>
-
-      <div className="page-card">
-        <h2 className="section-title">運動記録の一覧</h2>
-        {filteredExerciseRecords.length === 0 ? (
-          <p>この日の運動記録はまだありません。</p>
-        ) : (
-          <div className="field-grid">
-            {filteredExerciseRecords.map((record) => (
-              <div key={record.id} className="record-row">
-                <div className="record-head">
-                  <div className="record-main">
-                    <strong className="record-name">{record.name}</strong>
-                    <span className="record-kcal">-{record.calories.toFixed(0)} kcal</span>
-                  </div>
-                  <button type="button" className="button-secondary record-edit" aria-label="編集" disabled={editingRecordId === record.id} onClick={() => startEditRecord(record)}>
-                    編集
+              {heightEditing ? (
+                <div className="health-height-actions">
+                  <button type="button" className="health-height-confirm" onClick={confirmHeightEdit}>
+                    確定
                   </button>
-                  <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
-                    削除
+                  <button type="button" className="health-height-cancel" onClick={cancelHeightEdit}>
+                    取消
                   </button>
                 </div>
-                {renderRecordEditForm(record)}
-              </div>
-            ))}
+              ) : null}
+            </div>
+            <label className="health-inline-field">
+              体重kg
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={healthForm.weight}
+                onChange={(e) => setHealthForm((prev) => ({ ...prev, weight: e.target.value }))}
+              />
+            </label>
+            <label className="health-inline-field">
+              体脂肪率%
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={healthForm.bodyFat}
+                onChange={(e) => setHealthForm((prev) => ({ ...prev, bodyFat: e.target.value }))}
+              />
+            </label>
+            <label className="health-inline-field">
+              BMI
+              <input
+                type="text"
+                value={(() => {
+                  const weight = parseNullableNumber(healthForm.weight);
+                  const height = heightLocked ? savedHeight : parseNullableNumber(healthForm.height);
+                  const bmi = calcBmi(weight, height);
+                  return bmi == null ? '' : bmi.toFixed(1);
+                })()}
+                readOnly
+              />
+            </label>
+            <label className="health-inline-field">
+              収縮期
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={healthForm.systolicBp}
+                onChange={(e) => setHealthForm((prev) => ({ ...prev, systolicBp: e.target.value }))}
+              />
+            </label>
+            <label className="health-inline-field">
+              拡張期
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={healthForm.diastolicBp}
+                onChange={(e) => setHealthForm((prev) => ({ ...prev, diastolicBp: e.target.value }))}
+              />
+            </label>
+            <label className="health-inline-field">
+              脈拍
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={healthForm.pulse}
+                onChange={(e) => setHealthForm((prev) => ({ ...prev, pulse: e.target.value }))}
+              />
+            </label>
           </div>
-        )}
-      </div>
+          {(() => {
+            const st = saveStates['health'] ?? 'idle';
+            const deleteSt = saveStates['health-delete'] ?? 'idle';
+            const dateLabel = formatMonthDay(dateFilter);
+            const isToday = dateFilter === toJstDateString();
+            const busy = healthForDateLoading || st === 'saving' || deleteSt === 'saving';
+            return (
+              <>
+                {isToday ? null : (
+                  <p className="health-date-note">
+                    <small>今日以外の日（{dateLabel}）の記録を表示しています。日付は画面上部で変更できます。</small>
+                  </p>
+                )}
+                <div className="health-actions">
+                  <button
+                    className={`button-primary health-save-button save-feedback-button save-feedback-button-${st}`}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { void runSave('health', saveDailyHealthRecord); }}
+                  >
+                    {st === 'saving'
+                      ? '記録中...'
+                      : st === 'success'
+                        ? '✓ 記録しました'
+                        : st === 'error'
+                          ? '記録に失敗しました'
+                          : `${dateLabel}${isToday ? '（今日）' : ''}の記録として保存`}
+                  </button>
+                  {healthForDate ? (
+                    <button
+                      className="button-danger health-delete-button"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (!window.confirm(`${dateLabel}の健康記録を削除しますか？`)) return;
+                        void runSave('health-delete', deleteHealthRecord);
+                      }}
+                    >
+                      {deleteSt === 'saving' ? '削除中...' : 'この日の記録を削除'}
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            );
+          })()}
+          {healthStatusMessage ? <p><small>{healthStatusMessage}</small></p> : null}
+        </div>
 
-      <div className="page-card">
-        <h2 className="section-title">記録一覧</h2>
-        <div className="record-actions">
+        <div className="page-card">
           <button
             type="button"
-            className={`button-secondary record-save-all record-save-all-${bulkRecordSaveState}`}
-            disabled={bulkRecordSaveState === 'saving'}
-            onClick={() => {
-              void saveAllRecordMultipliers();
-            }}
+            className={`health-trend-toggle${healthTrendOpen ? ' health-trend-toggle-open' : ''}`}
+            aria-expanded={healthTrendOpen}
+            onClick={() => setHealthTrendOpen((prev) => !prev)}
           >
-            {bulkRecordSaveState === 'saving'
-              ? '保存中...'
-              : bulkRecordSaveState === 'success'
-                ? `✓ ${bulkRecordSaveCount}件保存しました`
-                : bulkRecordSaveState === 'error'
-                  ? '保存に失敗しました'
-                  : '全て保存'}
+            {healthTrendOpen ? '健康トレンドを閉じる' : '健康トレンドを見る'}
           </button>
-        </div>
-        {filteredIntakeRecords.length === 0 ? (
-          <p>この日の記録はまだありません。</p>
-        ) : (
-          <div className="field-grid">
-            {filteredIntakeRecords.map((record) => (
-              <div key={record.id} className="record-row">
-                <div className="record-head">
-                  <div className="record-main">
-                    <strong className="record-name">{record.name}</strong>
-                    <span className="record-kcal">{record.calories.toFixed(0)} kcal</span>
-                  </div>
-                  <label className="record-multiplier-field" aria-label="倍率入力">
-                    <span className="record-multiplier-prefix">x</span>
-                    <input
-                      type="number"
-                      min="0.1"
-                      step="0.1"
-                      inputMode="decimal"
-                      value={recordMultiplierDrafts[record.id] ?? String(record.multiplier ?? 1)}
-                      onChange={(e) => {
-                        handleRecordMultiplierInput(record.id, e.target.value);
-                      }}
-                    />
-                  </label>
-                  <button type="button" className="button-secondary record-edit" aria-label="編集" disabled={editingRecordId === record.id} onClick={() => startEditRecord(record)}>
-                    編集
-                  </button>
-                  <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
-                    削除
-                  </button>
-                </div>
-                {renderRecordEditForm(record)}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="page-card">
-        <div className="summary-actions">
-          <button className="button-secondary" type="button" onClick={() => { void fetchWeeklySummary(); }} disabled={weeklySummaryLoading}>
-            {weeklySummaryLoading ? '先週サマリーを分析中...' : '先週のサマリーを見る'}
-          </button>
-          {weeklySummaryError ? <small className="weekly-summary-error">{weeklySummaryError}</small> : null}
-        </div>
-      </div>
-
-      <div className="page-card">
-        <h2 className="section-title">プロフィール</h2>
-        <div className="profile-grid">
-          <label>
-            年齢
-            <input type="number" value={profile.age} onChange={(e) => setProfile({ ...profile, age: Number(e.target.value) })} />
-          </label>
-          <label>
-            体重(kg)
-            <input
-              type="number"
-              value={profile.weight}
-              readOnly={latestHealthWeight != null}
-              onChange={(e) => setProfile({ ...profile, weight: Number(e.target.value) })}
+          {healthTrendOpen ? (
+            <HealthTrendChart
+              records={healthTrend}
+              range={healthTrendRange}
+              onRangeChange={setHealthTrendRange}
+              loading={healthTrendLoading}
             />
-          </label>
-          <label>
-            性別
-            <select value={profile.sex} onChange={(e) => setProfile({ ...profile, sex: e.target.value as Sex })}>
-              <option value="male">男性</option>
-              <option value="female">女性</option>
-            </select>
-          </label>
-          <label>
-            身体活動レベル
-            <select value={profile.activity} onChange={(e) => setProfile({ ...profile, activity: e.target.value as ActivityLevel })}>
-              <option value="low">低い</option>
-              <option value="moderate">普通</option>
-              <option value="high">高い</option>
-            </select>
-          </label>
+          ) : null}
         </div>
-        <p>
-          <small>
-            {latestHealthWeight != null
-              ? '体重は毎日の健康記録の最新値を自動で反映しています。'
-              : '体重の健康記録がないため、手動で入力してください。'}
-          </small>
-        </p>
-        <p><small>推定エネルギー必要量は体重と活動レベルを元に簡易計算しています。</small></p>
-      </div>
+      </section>
 
-      <div className="page-card">
-        <button
-          type="button"
-          className={`health-trend-toggle${healthTrendOpen ? ' health-trend-toggle-open' : ''}`}
-          aria-expanded={healthTrendOpen}
-          onClick={() => setHealthTrendOpen((prev) => !prev)}
-        >
-          {healthTrendOpen ? '健康トレンドを閉じる' : '健康トレンドを見る'}
-        </button>
-        {healthTrendOpen ? (
-          <HealthTrendChart
-            records={healthTrend}
-            range={healthTrendRange}
-            onRangeChange={setHealthTrendRange}
-            loading={healthTrendLoading}
-          />
-        ) : null}
-      </div>
+      <section className="app-view" hidden={view !== 'summary'}>
+        <div className="page-card">
+          <h2 className="section-title">日次集計</h2>
+          <div className="summary-item">
+            <span>総カロリー</span>
+            <strong>{totals.calories.toFixed(0)} kcal</strong>
+          </div>
+          <div className="summary-item">
+            <span>タンパク質</span>
+            <strong>{totals.protein.toFixed(1)} g</strong>
+          </div>
+          <div className="summary-item">
+            <span>脂質</span>
+            <strong>{totals.fat.toFixed(1)} g</strong>
+          </div>
+          <div className="summary-item">
+            <span>炭水化物</span>
+            <strong>{totals.carbs.toFixed(1)} g</strong>
+          </div>
+          <div className="summary-item">
+            <span>食塩相当量</span>
+            <strong>{totals.salt.toFixed(1)} g</strong>
+          </div>
+          <div className="summary-item">
+            <span>体重</span>
+            <strong>{healthForDate?.weight != null ? `${healthForDate.weight.toFixed(1)} kg` : '未記録'}</strong>
+          </div>
+          <div className="summary-item">
+            <span>血圧</span>
+            <strong>{healthForDate?.systolicBp != null && healthForDate?.diastolicBp != null ? `${healthForDate.systolicBp}/${healthForDate.diastolicBp} mmHg` : '未記録'}</strong>
+          </div>
+          <div className="summary-item">
+            <span>吸収リン合計</span>
+            <strong>{totals.absorbedPhosphorus.toFixed(1)} mg（目安上限 {phosphorusUpperLimit}mg）</strong>
+          </div>
+          {totals.absorbedPhosphorus >= phosphorusWarningThreshold ? (
+            <p><small className="weekly-summary-error">リン摂取量が上限に近づいています</small></p>
+          ) : null}
+          <div className="summary-item">
+            <span>基礎代謝の目安</span>
+            <strong>{basalMetabolism.toFixed(0)} kcal</strong>
+          </div>
+          <div className="summary-item">
+            <span>運動による消費カロリー</span>
+            <strong>{exerciseCalories.toFixed(0)} kcal</strong>
+          </div>
+          <div className="summary-item">
+            <span>総消費カロリー（基礎代謝＋運動）</span>
+            <strong>{totalConsumptionCalories.toFixed(0)} kcal</strong>
+          </div>
+          <div className="summary-item">
+            <span>推定エネルギー必要量</span>
+            <strong>{estimatedEnergy.toFixed(0)} kcal</strong>
+          </div>
+          <div className="summary-item">
+            <span>推奨（DRI 2025 暫定）</span>
+            <strong>
+              {recommended.kcal} kcal / P:{recommended.protein}g 
+              F: {recommendedFatGrams}g 
+              C: {recommendedCarbsGrams}g 
+              Na: {recommended.salt}g
+            </strong>
+          </div>
+          <div className="summary-item">
+            <span>必要量との差</span>
+            <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
+          </div>
+          {(() => {
+            const st = saveStates['daily-note'] ?? 'idle';
+            return (
+              <div className="daily-note-box">
+                <label className="daily-note-label" htmlFor="daily-note-input">
+                  その日の気づき・メモ
+                </label>
+                <textarea
+                  id="daily-note-input"
+                  className="daily-note-input"
+                  rows={4}
+                  value={dailyNote}
+                  placeholder="体調・気づいたこと・食事の振り返りなど"
+                  disabled={dailyNoteLoading}
+                  onChange={(e) => setDailyNote(e.target.value)}
+                />
+                <div className="daily-note-actions">
+                  <button
+                    type="button"
+                    className={`button-secondary daily-note-save daily-note-save-${st}`}
+                    disabled={dailyNoteLoading || st === 'saving'}
+                    onClick={() => {
+                      void runSave('daily-note', saveDailyNote);
+                    }}
+                  >
+                    {st === 'saving'
+                      ? '保存中...'
+                      : st === 'success'
+                        ? '✓ 保存しました'
+                        : st === 'error'
+                          ? '保存に失敗しました'
+                          : 'メモを保存'}
+                  </button>
+                  {dailyNoteMessage ? <small className="weekly-summary-error">{dailyNoteMessage}</small> : null}
+                </div>
+              </div>
+            );
+          })()}
+          {weeklySummary ? (
+            <div className="weekly-summary-card">
+              <div className="weekly-summary-header">
+                <h3 className="weekly-summary-title">先週のサマリー（{weeklySummary.periodStart} - {weeklySummary.periodEnd}）</h3>
+                <button
+                  type="button"
+                  className="button-secondary weekly-summary-close"
+                  onClick={() => {
+                    setWeeklySummary(null);
+                    setWeeklySummaryError('');
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
+              <div className="weekly-summary-grid">
+                <div className="summary-item">
+                  <span>平均カロリー</span>
+                  <strong>{weeklySummary.averages.calories.toFixed(1)} kcal/日</strong>
+                </div>
+                <div className="summary-item">
+                  <span>平均タンパク質</span>
+                  <strong>{weeklySummary.averages.protein.toFixed(1)} g/日</strong>
+                </div>
+                <div className="summary-item">
+                  <span>平均脂質</span>
+                  <strong>{weeklySummary.averages.fat.toFixed(1)} g/日</strong>
+                </div>
+                <div className="summary-item">
+                  <span>平均炭水化物</span>
+                  <strong>{weeklySummary.averages.carbs.toFixed(1)} g/日</strong>
+                </div>
+                <div className="summary-item">
+                  <span>平均食塩相当量</span>
+                  <strong>{weeklySummary.averages.salt.toFixed(1)} g/日</strong>
+                </div>
+                <div className="summary-item">
+                  <span>運動消費カロリー（7日合計）</span>
+                  <strong>{weeklySummary.exerciseCaloriesTotal.toFixed(0)} kcal</strong>
+                </div>
+              </div>
+              <div className="weekly-summary-block">
+                <h4>Claude アドバイス</h4>
+                <p>{weeklySummary.analysis.overview}</p>
+              </div>
+              <div className="weekly-summary-block">
+                <h4>不足・過剰の栄養素</h4>
+                <ul>
+                  {weeklySummary.analysis.nutrientComparison.map((item, idx) => (
+                    <li key={`nutrient-${idx}`}>{item.nutrient}: {item.status}（{item.comment}）</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="weekly-summary-block">
+                <h4>食事パターンの傾向</h4>
+                <ul>
+                  {weeklySummary.analysis.patternInsights.map((item, idx) => (
+                    <li key={`pattern-${idx}`}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="weekly-summary-block">
+                <h4>改善のための具体的提案</h4>
+                <ul>
+                  {weeklySummary.analysis.actionSuggestions.map((item, idx) => (
+                    <li key={`suggestion-${idx}`}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="weekly-summary-block">
+                <h4>体重・血圧の推移</h4>
+                {weeklySummary.analysis.healthTrend.length > 0 ? (
+                  <ul>
+                    {weeklySummary.analysis.healthTrend.map((item, idx) => (
+                      <li key={`health-trend-${idx}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : weeklySummary.healthRecords.length > 0 ? (
+                  <ul>
+                    {weeklySummary.healthRecords.map((item) => (
+                      <li key={`health-row-${item.id}`}>{item.date}: 体重 {item.weight ?? '-'}kg / 血圧 {item.systolicBp ?? '-'}/{item.diastolicBp ?? '-'} / 脈拍 {item.pulse ?? '-'}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>記録なし</p>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <p><small>グラフの赤い棒は運動記録に入力した消費カロリーのみで、基礎代謝は含みません。</small></p>
+          <div className="chart-wrapper">
+            <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} totalConsumptionCalories={totalConsumptionCalories} date={dateFilter} />
+          </div>
+        </div>
+
+        <div className="page-card">
+          <div className="summary-actions">
+            <button className="button-secondary" type="button" onClick={() => { void fetchWeeklySummary(); }} disabled={weeklySummaryLoading}>
+              {weeklySummaryLoading ? '先週サマリーを分析中...' : '先週のサマリーを見る'}
+            </button>
+            {weeklySummaryError ? <small className="weekly-summary-error">{weeklySummaryError}</small> : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="app-view" hidden={view !== 'settings'}>
+        <div className="page-card">
+          <h2 className="section-title">プロフィール</h2>
+          <div className="profile-grid">
+            <label>
+              年齢
+              <input type="number" value={profile.age} onChange={(e) => setProfile({ ...profile, age: Number(e.target.value) })} />
+            </label>
+            <label>
+              体重(kg)
+              <input
+                type="number"
+                value={profile.weight}
+                readOnly={latestHealthWeight != null}
+                onChange={(e) => setProfile({ ...profile, weight: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              性別
+              <select value={profile.sex} onChange={(e) => setProfile({ ...profile, sex: e.target.value as Sex })}>
+                <option value="male">男性</option>
+                <option value="female">女性</option>
+              </select>
+            </label>
+            <label>
+              身体活動レベル
+              <select value={profile.activity} onChange={(e) => setProfile({ ...profile, activity: e.target.value as ActivityLevel })}>
+                <option value="low">低い</option>
+                <option value="moderate">普通</option>
+                <option value="high">高い</option>
+              </select>
+            </label>
+          </div>
+          <p>
+            <small>
+              {latestHealthWeight != null
+                ? '体重は毎日の健康記録の最新値を自動で反映しています。'
+                : '体重の健康記録がないため、手動で入力してください。'}
+            </small>
+          </p>
+          <p><small>推定エネルギー必要量は体重と活動レベルを元に簡易計算しています。</small></p>
+        </div>
+      </section>
     </main>
+    <nav className="app-tabbar" aria-label="画面の切り替え">
+      {TAB_VIEWS.map((id) => {
+        const meta = APP_VIEWS.find((v) => v.id === id);
+        return (
+          <button
+            key={id}
+            type="button"
+            className={`app-tab${view === id ? ' is-active' : ''}`}
+            aria-current={view === id ? 'page' : undefined}
+            onClick={() => navigate(id)}
+          >
+            <span className="app-tab-icon" aria-hidden="true">{meta?.icon}</span>
+            <span className="app-tab-label">{meta?.label}</span>
+          </button>
+        );
+      })}
+    </nav>
+    <FloatingButton onPress={handleFabPress} />
+    </>
   );
 }

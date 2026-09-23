@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import ServiceWorkerRegister from './components/ServiceWorkerRegister';
-import FloatingButton from './components/FloatingButton';
 
 export const metadata: Metadata = {
   title: '栄養管理アプリ',
@@ -20,7 +19,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
         <ServiceWorkerRegister />
-        <FloatingButton />
       </body>
     </html>
   );
