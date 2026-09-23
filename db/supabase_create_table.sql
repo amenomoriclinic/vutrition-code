@@ -48,6 +48,39 @@ create table if not exists public.daily_notes (
   updated_at timestamptz default now()
 );
 
+-- マイ定番食品, shared between devices (previously kept in each browser's
+-- localStorage). Like the tables above it has no user column: this app is
+-- single-user and every table is accessed with the anon key.
+create table if not exists public.favorite_foods (
+  id uuid primary key default gen_random_uuid(),
+  -- Id the favorite had in the code presets or in localStorage. The unique
+  -- constraint makes the one-time migration from each device idempotent
+  -- (insert ... on conflict (legacy_id) do nothing); null for new favorites.
+  legacy_id text unique,
+  name text not null,
+  amount_text text,
+  calories numeric not null default 0,
+  protein numeric not null default 0,
+  fat numeric not null default 0,
+  carbs numeric not null default 0,
+  salt numeric not null default 0,           -- 食塩相当量 (g)
+  phosphorus numeric not null default 0,     -- mg
+  phosphorus_absorption_rate numeric not null default 0.5,
+  -- Per-base values when registered from a nutrition label, e.g.
+  -- {"amountText":"100gあたり","amount":100,"unit":"g","weight":null,
+  --  "calories":56,"protein":4.9,"fat":3,"carbs":2,"salt":0.02,"phosphorus":90}.
+  -- Kept so other amounts can be recorded from it later.
+  label_base jsonb,
+  sort_order integer not null default 0,
+  -- Soft delete: a deleted preset keeps its row, so another device's first
+  -- migration cannot bring it back.
+  deleted_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_favorite_foods_sort on public.favorite_foods(sort_order, created_at);
+
 alter table public.health_records
   add column if not exists body_fat numeric;
 

@@ -108,6 +108,22 @@ type FavoriteFood = {
   salt: number;
   phosphorus: number;
   phosphorusAbsorptionRate: number;
+  sortOrder?: number;
+  // Per-base values when registered from a nutrition label (stored for later use).
+  labelBase?: FavoriteLabelBase | null;
+};
+
+type FavoriteLabelBase = {
+  amountText: string;
+  amount: number;
+  unit: LabelAmountUnit;
+  weight: number | null;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  salt: number;
+  phosphorus: number;
 };
 
 type NutritionRecordInsert = {
@@ -251,6 +267,8 @@ const STORAGE_FAVORITES = 'nutrition_favorites';
 const STORAGE_PROFILE = 'nutrition_profile';
 const STORAGE_MULTIPLIER_OVERRIDES = 'nutrition_multiplier_overrides';
 
+// Preset favorites. They are copied into favorite_foods once (keyed by id) and
+// are edited or deleted there afterwards; the code values are not reapplied.
 const defaultFavorites: FavoriteFood[] = [
   {
     id: 'inonoras',
@@ -364,6 +382,66 @@ const defaultFavorites: FavoriteFood[] = [
 ];
 
 const defaultFavoriteById = new Map(defaultFavorites.map((item) => [item.id, item]));
+
+// Set once this device has copied its favorites into Supabase. The localStorage
+// copy itself is left untouched as a backup.
+const STORAGE_FAVORITES_MIGRATED = 'nutrition_favorites_migrated_to_db';
+
+// Favorites the user added on this device before they moved to Supabase (the
+// presets always came from the code, so only non-preset ids are kept).
+const readLocalCustomFavorites = (): FavoriteFood[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_FAVORITES) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(isValidFavorite)
+      .filter((f) => !defaultFavoriteById.has(String(f.id)))
+      .map((f) => ({
+        id: String(f.id),
+        name: String(f.name),
+        amountText: String(f.amountText || '1単位'),
+        calories: Number(f.calories) || 0,
+        protein: Number(f.protein) || 0,
+        fat: Number(f.fat) || 0,
+        carbs: Number(f.carbs) || 0,
+        salt: Number(f.salt) || 0,
+        phosphorus: pickPhosphorusValue(f) || 0,
+        phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(f, 0.5),
+      }))
+      .filter((f) => !isLegacyInoras120(f));
+  } catch {
+    return [];
+  }
+};
+
+const toFavoriteRow = (favorite: FavoriteFood) => ({
+  name: favorite.name,
+  amount_text: favorite.amountText || null,
+  calories: favorite.calories,
+  protein: favorite.protein,
+  fat: favorite.fat,
+  carbs: favorite.carbs,
+  salt: favorite.salt,
+  phosphorus: favorite.phosphorus,
+  phosphorus_absorption_rate: favorite.phosphorusAbsorptionRate,
+  label_base: favorite.labelBase ?? null,
+  sort_order: favorite.sortOrder ?? 0,
+});
+
+const mapFavoriteRow = (row: any): FavoriteFood => ({
+  id: String(row.id),
+  name: String(row.name || ''),
+  amountText: String(row.amount_text || ''),
+  calories: Number(row.calories) || 0,
+  protein: Number(row.protein) || 0,
+  fat: Number(row.fat) || 0,
+  carbs: Number(row.carbs) || 0,
+  salt: Number(row.salt) || 0,
+  phosphorus: Number(row.phosphorus) || 0,
+  phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(Number(row.phosphorus_absorption_rate ?? 0.5)),
+  sortOrder: Number(row.sort_order) || 0,
+  labelBase: row.label_base ?? null,
+});
 
 const activityLabels: Record<ActivityLevel, string> = {
   low: '低い(デスク中心)',
@@ -516,7 +594,11 @@ export default function HomePage() {
   const [exerciseInputs, setExerciseInputs] = useState({ runKm: '0', manualKcal: '0', met: '3.5', metMinutes: '30' });
   const [estimates, setEstimates] = useState<EditableEstimate[]>([]);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
-  const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
+  const [favorites, setFavorites] = useState<FavoriteFood[]>([]);
+  // 'db': favorites live in Supabase and can be changed. 'local': Supabase could not
+  // be used, so this device's old list is shown read-only.
+  const [favoritesSource, setFavoritesSource] = useState<'loading' | 'db' | 'local'>('loading');
+  const [favoritesMessage, setFavoritesMessage] = useState('');
   const [profile, setProfile] = useState({ age: 35, sex: 'male' as Sex, weight: 60, activity: 'moderate' as ActivityLevel });
   const [dateFilter, setDateFilter] = useState(toJstDateString());
   // Today's date when the app was last in the foreground; used to jump back to
@@ -658,40 +740,9 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    const savedFavorites = localStorage.getItem(STORAGE_FAVORITES);
     const savedProfile = localStorage.getItem(STORAGE_PROFILE);
 
-    // The code-defined presets are always the source of truth so newly added
-    // presets (e.g. beer / sake) and updated values show up on every device.
-    // Stale localStorage snapshots are ignored for presets; only favorites the
-    // user added themselves (ids that are not presets) are restored.
-    let customFavorites: FavoriteFood[] = [];
-    if (savedFavorites) {
-      try {
-        const parsed = JSON.parse(savedFavorites);
-        if (Array.isArray(parsed)) {
-          customFavorites = parsed
-            .filter(isValidFavorite)
-            .filter((f) => !defaultFavoriteById.has(String(f.id)))
-            .map((f) => ({
-              id: String(f.id),
-              name: String(f.name),
-              amountText: String(f.amountText || '1単位'),
-              calories: Number(f.calories) || 0,
-              protein: Number(f.protein) || 0,
-              fat: Number(f.fat) || 0,
-              carbs: Number(f.carbs) || 0,
-              salt: Number(f.salt) || 0,
-              phosphorus: pickPhosphorusValue(f) || 0,
-              phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(f, 0.5),
-            }))
-            .filter((f) => !isLegacyInoras120(f));
-        }
-      } catch {
-        customFavorites = [];
-      }
-    }
-    setFavorites([...defaultFavorites, ...customFavorites]);
+    void loadFavorites();
 
     if (savedProfile) {
       try {
@@ -900,9 +951,6 @@ export default function HomePage() {
 
   // records are persisted in Supabase; no localStorage sync needed
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_FAVORITES, JSON.stringify(favorites));
-  }, [favorites]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_PROFILE, JSON.stringify(profile));
@@ -1995,13 +2043,92 @@ export default function HomePage() {
     }
   };
 
-  const addFavorite = () => {
-    if (!favoriteName.trim()) {
-      setStatusMessage('お気に入りの食品名を入力してください。');
+  const loadFavorites = async () => {
+    const localCustom = readLocalCustomFavorites();
+    const localList = [...defaultFavorites, ...localCustom];
+    if (!isSupabaseConfigured) {
+      setFavorites(localList);
+      setFavoritesSource('local');
       return;
     }
-    const newFavorite: FavoriteFood = {
-      id: crypto.randomUUID(),
+
+    try {
+      // One-time copy of the presets and this device's own favorites. Rows are keyed
+      // by their old id, so running this on the phone and the PC merges both lists
+      // without duplicates, and a preset deleted on one device stays deleted.
+      let migrated = false;
+      try {
+        migrated = localStorage.getItem(STORAGE_FAVORITES_MIGRATED) === '1';
+      } catch {
+        migrated = false;
+      }
+      if (!migrated) {
+        const rows = [
+          ...defaultFavorites.map((f, i) => ({ ...toFavoriteRow({ ...f, sortOrder: i }), legacy_id: f.id })),
+          ...localCustom.map((f, i) => ({ ...toFavoriteRow({ ...f, sortOrder: 100 + i }), legacy_id: f.id })),
+        ];
+        const { error } = await supabase
+          .from('favorite_foods')
+          .upsert(rows, { onConflict: 'legacy_id', ignoreDuplicates: true });
+        if (error) throw error;
+        try {
+          localStorage.setItem(STORAGE_FAVORITES_MIGRATED, '1');
+        } catch {
+          // Without the flag the migration simply runs (as a no-op) next time.
+        }
+      }
+
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .select('*')
+        .is('deleted_at', null)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+
+      setFavorites((data || []).map(mapFavoriteRow));
+      setFavoritesSource('db');
+      setFavoritesMessage('');
+    } catch (error) {
+      console.error('[favorites] load failed', error);
+      setFavorites(localList);
+      setFavoritesSource('local');
+      setFavoritesMessage(
+        `定番食品をデータベースから読み込めませんでした。この端末に保存されていた一覧を表示しています（追加・編集・削除はできません）: ${formatSupabaseError(error)}`
+      );
+    }
+  };
+
+  const nextFavoriteSortOrder = () => favorites.reduce((max, f) => Math.max(max, f.sortOrder ?? 0), 0) + 1;
+
+  // Inserts a favorite and returns the stored one, or null (message already shown).
+  const insertFavorite = async (favorite: FavoriteFood): Promise<FavoriteFood | null> => {
+    if (favoritesSource !== 'db') {
+      setFavoritesMessage('定番食品のデータベースが使えないため追加できません。');
+      return null;
+    }
+    const { data, error } = await supabase
+      .from('favorite_foods')
+      .insert({ ...toFavoriteRow({ ...favorite, sortOrder: nextFavoriteSortOrder() }) })
+      .select('*');
+    if (error || !data || data.length === 0) {
+      console.error('[favorites] insert failed', error);
+      setFavoritesMessage(`定番食品の保存に失敗しました: ${error ? formatSupabaseError(error) : '保存結果を確認できませんでした'}`);
+      return null;
+    }
+    const saved = mapFavoriteRow(data[0]);
+    setFavorites((prev) => [...prev, saved]);
+    setFavoritesMessage('');
+    return saved;
+  };
+
+  const addFavorite = async () => {
+    if (!favoriteName.trim()) {
+      setFavoritesMessage('定番食品の名前を入力してください。');
+      return;
+    }
+    const saved = await insertFavorite({
+      id: '',
       name: favoriteName.trim(),
       amountText: '1単位',
       calories: 0,
@@ -2011,18 +2138,33 @@ export default function HomePage() {
       salt: 0,
       phosphorus: 0,
       phosphorusAbsorptionRate: 0.5,
-    };
-    setFavorites([newFavorite, ...favorites]);
-    setFavoriteName('');
-    setStatusMessage('マイ定番食品に保存しました。');
+    });
+    if (saved) {
+      setFavoriteName('');
+    }
   };
 
-  const removeFavorite = (id: string) => {
+  const removeFavorite = async (id: string) => {
+    if (favoritesSource !== 'db') {
+      setFavoritesMessage('定番食品のデータベースが使えないため削除できません。');
+      return;
+    }
     if (!window.confirm('この定番食品を削除しますか？')) {
       return;
     }
-    setFavorites(favorites.filter((f) => f.id !== id));
-    setStatusMessage('定番食品を削除しました。');
+    // Soft delete, so the one-time migration on another device cannot re-add it.
+    const { data, error } = await supabase
+      .from('favorite_foods')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id');
+    if (error || !data || data.length === 0) {
+      console.error('[favorites] delete failed', error);
+      setFavoritesMessage(`定番食品の削除に失敗しました: ${error ? formatSupabaseError(error) : '画面を再読み込みしてお試しください'}`);
+      return;
+    }
+    setFavorites((prev) => prev.filter((f) => f.id !== id));
+    setFavoritesMessage('');
   };
 
   const removeRecord = (id: string) => {
@@ -2690,17 +2832,19 @@ export default function HomePage() {
               新しい定番食品名
               <input value={favoriteName} onChange={(e) => setFavoriteName(e.target.value)} placeholder="例: おにぎり" />
             </label>
-            <button className="button-secondary" type="button" onClick={addFavorite}>
+            <button className="button-secondary" type="button" disabled={favoritesSource !== 'db'} onClick={() => { void addFavorite(); }}>
               定番食品に追加
             </button>
           </div>
+          {favoritesMessage ? <p><small className="weekly-summary-error">{favoritesMessage}</small></p> : null}
+          {favoritesSource === 'loading' ? <p><small>定番食品を読み込み中...</small></p> : null}
           <div className="card-row">
             {favorites.map((favorite) => (
               <div key={favorite.id} className="favorite-item">
                 <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
                   {favorite.name}
                 </button>
-                <button className="button-danger record-delete" type="button" aria-label="削除" onClick={() => removeFavorite(favorite.id)}>
+                <button className="button-danger record-delete" type="button" aria-label="削除" disabled={favoritesSource !== 'db'} onClick={() => { void removeFavorite(favorite.id); }}>
                   ×
                 </button>
               </div>
