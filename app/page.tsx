@@ -6,7 +6,7 @@ import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
 import FloatingButton from './components/FloatingButton';
 import HealthTrendChart, { HealthTrendRange } from './components/HealthTrendChart';
-import { calcRequirements } from '../lib/dri';
+import { calcRequirements, netMetKcal, netRunningKcal } from '../lib/dri';
 
 type Sex = 'male' | 'female';
 type ActivityLevel = 'low' | 'moderate' | 'high';
@@ -470,7 +470,7 @@ export default function HomePage() {
   const [estimates, setEstimates] = useState<EditableEstimate[]>([]);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
-  const [profile, setProfile] = useState({ age: 35, sex: 'male' as Sex, weight: 60, activity: 'moderate' as ActivityLevel });
+  const [profile, setProfile] = useState({ age: 35, sex: 'male' as Sex, weight: 60, activity: 'low' as ActivityLevel });
   const [dateFilter, setDateFilter] = useState(toJstDateString());
   // Today's date when the app was last in the foreground; used to jump back to
   // today when the app is resumed on a later day.
@@ -2843,7 +2843,7 @@ export default function HomePage() {
                   onClick={() => {
                     const km = Number(exerciseInputs.runKm);
                     if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
-                    const caloriesBurned = Math.round(profile.weight * km * 1.036);
+                    const caloriesBurned = Math.round(netRunningKcal(profile.weight, km));
                     if (!confirmUnusualExerciseCalories(caloriesBurned)) return;
                     const insert: NutritionRecordInsert = { name: `ランニング ${km} km`, amount_text: null, calories: caloriesBurned, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
                     void runSave('exercise-run', () => saveExerciseRecord(insert));
@@ -2895,7 +2895,7 @@ export default function HomePage() {
                     const min = Number(exerciseInputs.metMinutes);
                     if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
                     const hours = min / 60;
-                    const kcal = Math.round(met * profile.weight * hours);
+                    const kcal = Math.round(netMetKcal(met, profile.weight, hours));
                     if (!confirmUnusualExerciseCalories(kcal)) return;
                     const insert: NutritionRecordInsert = { name: `筋トレ ${min}分`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: `MET ${met}`, image_url: null };
                     void runSave('exercise-met', () => saveExerciseRecord(insert));
@@ -2907,6 +2907,16 @@ export default function HomePage() {
               );
             })()}
           </div>
+          <p>
+            <small>
+              記録するのは安静時の分（1メッツ）を除いた正味の消費カロリーで、その日のエネルギー必要量に加算されます。
+              {exerciseTab === 'run'
+                ? 'ランニング: 体重 × 距離(km) × 1.0（ACSMの代謝式）。'
+                : exerciseTab === 'met'
+                  ? '筋トレ: (メッツ − 1) × 体重 × 時間。'
+                  : '手動: 活動量計の「活動カロリー」など、安静時の分を含まない値を入力してください。'}
+            </small>
+          </p>
           {statusMessage ? <p><small>{statusMessage}</small></p> : null}
         </div>
 
