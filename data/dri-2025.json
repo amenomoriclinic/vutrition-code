@@ -1,16 +1,33 @@
 {
-  "male": {
-    "18-29": { "kcal": 2600, "protein": 65, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.5 },
-    "30-49": { "kcal": 2750, "protein": 65, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.5 },
-    "50-64": { "kcal": 2650, "protein": 65, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.5 },
-    "65-74": { "kcal": 2350, "protein": 60, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.0 },
-    "75+": { "kcal": 2250, "protein": 60, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 7.0 }
+  "_source": "日本人の食事摂取基準（2025年版）策定検討会報告書（厚生労働省, 2024）。18歳以上のみ収録。",
+  "physicalActivityLevel": {
+    "_source": "エネルギー 表4 年齢区分及び身体活動レベル（カテゴリー）別の身体活動レベル基準値（男女共通） p.67。75歳以上の「高い」は設定なし。",
+    "18-29": { "low": 1.50, "moderate": 1.75, "high": 2.00 },
+    "30-49": { "low": 1.50, "moderate": 1.75, "high": 2.00 },
+    "50-64": { "low": 1.50, "moderate": 1.75, "high": 2.00 },
+    "65-74": { "low": 1.50, "moderate": 1.70, "high": 1.90 },
+    "75+": { "low": 1.40, "moderate": 1.70, "high": null }
   },
-  "female": {
-    "18-29": { "kcal": 1950, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.5 },
-    "30-49": { "kcal": 2050, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.5 },
-    "50-64": { "kcal": 1950, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.5 },
-    "65-74": { "kcal": 1850, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.0 },
-    "75+": { "kcal": 1750, "protein": 50, "fat_pct_min": 20, "fat_pct_max": 30, "carbs_pct_min": 50, "carbs_pct_max": 65, "salt": 6.0 }
+  "protein": {
+    "_source": "たんぱく質の食事摂取基準 p.103。rda: 推奨量 (g/日)、targetPct: 目標量 (%エネルギー)。",
+    "male": {
+      "18-29": { "rda": 65, "targetPct": [13, 20] },
+      "30-49": { "rda": 65, "targetPct": [13, 20] },
+      "50-64": { "rda": 65, "targetPct": [14, 20] },
+      "65-74": { "rda": 60, "targetPct": [15, 20] },
+      "75+": { "rda": 60, "targetPct": [15, 20] }
+    },
+    "female": {
+      "18-29": { "rda": 50, "targetPct": [13, 20] },
+      "30-49": { "rda": 50, "targetPct": [13, 20] },
+      "50-64": { "rda": 50, "targetPct": [14, 20] },
+      "65-74": { "rda": 50, "targetPct": [15, 20] },
+      "75+": { "rda": 50, "targetPct": [15, 20] }
+    }
+  },
+  "saltTarget": {
+    "_source": "ナトリウム 表1 目標量（食塩相当量 g/日未満）D列 p.248。18歳以上は全年齢で同じ値。",
+    "male": 7.5,
+    "female": 6.5
   }
 }

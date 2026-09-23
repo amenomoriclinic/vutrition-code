@@ -399,6 +399,19 @@ small {
   color: #0f766e;
 }
 
+/* A summary row whose value is followed by a full-width breakdown line. */
+.summary-item-stacked {
+  flex-wrap: wrap;
+}
+
+.summary-item-stacked small {
+  flex-basis: 100%;
+}
+
+.summary-item strong.summary-value-warning {
+  color: #b45309;
+}
+
 .summary-actions {
   display: grid;
   gap: 8px;

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { getDRI } from '../../lib/dri';
+import React from "react";
+import type { Requirements } from '../../lib/dri';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -17,19 +17,13 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 type Props = {
   totals: { calories: number; protein: number; fat: number; carbs: number; salt: number };
-  profile: { age: number; sex: string; weight: number; activity: string };
-  consumptionCalories?: number;
-  totalConsumptionCalories?: number;
+  // The day's targets from calcRequirements; null when they cannot be calculated,
+  // in which case only intake is drawn.
+  requirements: Requirements | null;
   date: string;
 };
 
-export default function NutritionChart({ totals, profile, consumptionCalories, totalConsumptionCalories, date }: Props) {
-  const recommended = useMemo(() => getDRI(profile as any), [profile]);
-
-  const fatPctAvg = ((recommended.fat_pct_min ?? 20) + (recommended.fat_pct_max ?? 30)) / 2;
-  const carbsPctAvg = ((recommended.carbs_pct_min ?? 50) + (recommended.carbs_pct_max ?? 65)) / 2;
-  const recFatG = Math.round(((recommended.kcal * (fatPctAvg / 100)) / 9) * 10) / 10;
-  const recCarbsG = Math.round(((recommended.kcal * (carbsPctAvg / 100)) / 4) * 10) / 10;
+export default function NutritionChart({ totals, requirements, date }: Props) {
 
   const simpleBars = {
     barThickness: 14,
@@ -65,7 +59,13 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
     },
   };
 
-  const makeTwoBarChart = (title: string, intake: number, recommendedValue: number) => ({
+  const makeTwoBarChart = (
+    title: string,
+    intake: number,
+    target: number | null,
+    targetLabel = "目標",
+    extra?: { label: string; value: number },
+  ) => ({
     data: {
       labels: [title],
       datasets: [
@@ -75,12 +75,22 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
           data: [intake],
           ...simpleBars,
         },
-        {
-          label: "推奨",
-          backgroundColor: "rgba(75,192,192,0.75)",
-          data: [recommendedValue],
-          ...simpleBars,
-        },
+        ...(target == null
+          ? []
+          : [{
+              label: targetLabel,
+              backgroundColor: "rgba(75,192,192,0.75)",
+              data: [target],
+              ...simpleBars,
+            }]),
+        ...(extra
+          ? [{
+              label: extra.label,
+              backgroundColor: "rgba(148,163,184,0.8)",
+              data: [extra.value],
+              ...simpleBars,
+            }]
+          : []),
       ],
     },
     options: {
@@ -92,34 +102,37 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
     },
   });
 
+  // Intake next to the requirement, which is stacked from BMR × PAL and the day's
+  // net exercise so both parts stay visible.
   const caloriesChart = {
     data: {
-      labels: ["カロリー(kcal)"],
+      labels: ["摂取", "必要量"],
       datasets: [
         {
-          label: "摂取カロリー（青）",
+          label: "摂取（青）",
           backgroundColor: "rgba(54,162,235,0.8)",
-          data: [totals.calories],
+          data: [totals.calories, 0],
+          stack: "kcal",
           ...simpleBars,
         },
-        {
-          label: "運動消費（ピンク）",
-          backgroundColor: "rgba(255,99,132,0.75)",
-          data: [consumptionCalories ?? 0],
-          ...simpleBars,
-        },
-        {
-          label: "DRI推奨摂取（緑）",
-          backgroundColor: "rgba(75,192,192,0.75)",
-          data: [recommended.kcal],
-          ...simpleBars,
-        },
-        {
-          label: "総消費（オレンジ）",
-          backgroundColor: "rgba(245,158,11,0.85)",
-          data: [totalConsumptionCalories ?? 0],
-          ...simpleBars,
-        },
+        ...(requirements
+          ? [
+              {
+                label: "基礎代謝×身体活動レベル（緑）",
+                backgroundColor: "rgba(75,192,192,0.75)",
+                data: [0, requirements.baseEnergy],
+                stack: "kcal",
+                ...simpleBars,
+              },
+              {
+                label: "運動・正味（ピンク）",
+                backgroundColor: "rgba(255,99,132,0.75)",
+                data: [0, requirements.exerciseNet],
+                stack: "kcal",
+                ...simpleBars,
+              },
+            ]
+          : []),
       ],
     },
     options: {
@@ -128,13 +141,23 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
         ...baseOptions.plugins,
         title: { display: true, text: `カロリー比較 (${date})`, font: { size: 13, weight: "bold" as const } },
       },
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, beginAtZero: true },
+      },
     },
   };
 
-  const carbsChart = makeTwoBarChart("炭水化物(g)", totals.carbs, recCarbsG);
-  const proteinChart = makeTwoBarChart("タンパク質(g)", totals.protein, recommended.protein);
-  const fatChart = makeTwoBarChart("脂質(g)", totals.fat, recFatG);
-  const saltChart = makeTwoBarChart("食塩相当量(g)", totals.salt, recommended.salt);
+  const carbsChart = makeTwoBarChart("炭水化物(g)", totals.carbs, requirements?.carbsG ?? null);
+  const proteinChart = makeTwoBarChart(
+    "タンパク質(g)",
+    totals.protein,
+    requirements?.proteinG ?? null,
+    "目標",
+    requirements ? { label: "推奨量（確認用）", value: requirements.proteinRda } : undefined,
+  );
+  const fatChart = makeTwoBarChart("脂質(g)", totals.fat, requirements?.fatG ?? null);
+  const saltChart = makeTwoBarChart("食塩相当量(g)", totals.salt, requirements?.saltMaxG ?? null, "目標量（未満）");
 
   return (
     <div className="metric-chart-grid">
@@ -143,7 +166,7 @@ export default function NutritionChart({ totals, profile, consumptionCalories, t
           <Bar data={caloriesChart.data} options={caloriesChart.options} />
         </div>
       </div>
-      <small className="metric-legend-note">判定: 青=橙で維持 / 青&gt;橙で増 / 青&lt;橙で減</small>
+      <small className="metric-legend-note">判定: 摂取（青）が必要量（緑＋ピンク）と同じなら維持 / 多ければ増 / 少なければ減</small>
       <div className="metric-row-2">
         <div className="metric-panel">
           <Bar data={carbsChart.data} options={carbsChart.options} />

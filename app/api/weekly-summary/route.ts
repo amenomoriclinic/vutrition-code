@@ -13,13 +13,15 @@ type WeeklySummaryRequest = {
     salt: number;
   };
   exerciseCaloriesTotal: number;
+  // Null when targets cannot be calculated (under 18, or height/weight missing).
   recommendedDaily: {
     calories: number;
     protein: number;
+    proteinRda: number;
     fat: number;
     carbs: number;
     salt: number;
-  };
+  } | null;
   healthTrend?: Array<{
     date: string;
     weight: number | null;
@@ -50,7 +52,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json()) as WeeklySummaryRequest;
-  if (!body?.periodStart || !body?.periodEnd || !body?.averages || !body?.recommendedDaily) {
+  if (!body?.periodStart || !body?.periodEnd || !body?.averages) {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
@@ -71,7 +73,9 @@ export async function POST(request: Request) {
     `対象期間: ${body.periodStart} から ${body.periodEnd}`,
     `7日平均摂取: kcal=${body.averages.calories}, P=${body.averages.protein}g, F=${body.averages.fat}g, C=${body.averages.carbs}g, 塩=${body.averages.salt}g`,
     `7日運動消費カロリー合計: ${body.exerciseCaloriesTotal} kcal`,
-    `DRI推奨値(1日): kcal=${body.recommendedDaily.calories}, P=${body.recommendedDaily.protein}g, F=${body.recommendedDaily.fat}g, C=${body.recommendedDaily.carbs}g, 塩=${body.recommendedDaily.salt}g`,
+    body.recommendedDaily
+      ? `1日の目標（日本人の食事摂取基準2025年版と国立健康・栄養研究所の式による。エネルギー=基礎代謝×身体活動レベル＋週平均の運動(正味)）: kcal=${body.recommendedDaily.calories}, P=${body.recommendedDaily.protein}g（推奨量${body.recommendedDaily.proteinRda}g以上）, F=${body.recommendedDaily.fat}g, C=${body.recommendedDaily.carbs}g, 食塩相当量=${body.recommendedDaily.salt}g未満`
+      : '1日の目標: 算出できません（18歳未満、または身長・体重が未入力）。目標との比較は行わないでください。',
     `健康記録推移: ${JSON.stringify(body.healthTrend || [])}`,
     `プロフィール: ${JSON.stringify(body.profile || {})}`,
   ].join('\n');

@@ -6,7 +6,7 @@ import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
 import FloatingButton from './components/FloatingButton';
 import HealthTrendChart, { HealthTrendRange } from './components/HealthTrendChart';
-import { getDRI } from '../lib/dri';
+import { calcRequirements } from '../lib/dri';
 
 type Sex = 'male' | 'female';
 type ActivityLevel = 'low' | 'moderate' | 'high';
@@ -821,35 +821,19 @@ export default function HomePage() {
     [filteredRecords]
   );
 
-  const recommended = useMemo(() => getDRI(profile), [profile]);
+  const energyProfile = useMemo(
+    () => ({ age: profile.age, sex: profile.sex, weight: profile.weight, height: savedHeight, activity: profile.activity }),
+    [profile, savedHeight]
+  );
 
-  const recommendedFatGrams = useMemo(() => {
-    const fatPct = ((recommended.fat_pct_min ?? 20) + (recommended.fat_pct_max ?? 30)) / 2;
-    return Math.round(((recommended.kcal * fatPct) / 100 / 9) * 10) / 10;
-  }, [recommended]);
-
-  const recommendedCarbsGrams = useMemo(() => {
-    const carbsPct = ((recommended.carbs_pct_min ?? 50) + (recommended.carbs_pct_max ?? 65)) / 2;
-    return Math.round(((recommended.kcal * carbsPct) / 100 / 4) * 10) / 10;
-  }, [recommended]);
+  // The single source of the day's energy requirement and P/F/C/salt targets
+  // (BMR × PAL + that day's net exercise), used by every screen, the chart and
+  // the weekly AI analysis.
+  const requirements = useMemo(() => calcRequirements(energyProfile, exerciseCalories), [energyProfile, exerciseCalories]);
+  const dayRequirements = requirements.ok ? requirements.value : null;
 
   const phosphorusUpperLimit = useMemo(() => (profile.sex === 'male' ? 400 : 300), [profile.sex]);
   const phosphorusWarningThreshold = useMemo(() => phosphorusUpperLimit * 0.8, [phosphorusUpperLimit]);
-
-  const estimatedEnergy = useMemo(() => {
-    // estimated daily energy requirement (simple PAL model)
-    const base = profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight; // basal ~ kcal/day
-    const pal = profile.activity === 'low' ? 1.4 : profile.activity === 'high' ? 1.75 : 1.55;
-    return Math.round(base * pal);
-  }, [profile]);
-
-  const basalMetabolism = useMemo(() => {
-    return Math.round(profile.sex === 'male' ? 24 * profile.weight : 22 * profile.weight);
-  }, [profile]);
-
-  const totalConsumptionCalories = useMemo(() => {
-    return basalMetabolism + exerciseCalories;
-  }, [basalMetabolism, exerciseCalories]);
 
   // records are persisted in Supabase; no localStorage sync needed
 
@@ -1352,6 +1336,20 @@ export default function HomePage() {
         salt: round1(intakeTotals.salt / 7),
       };
 
+      // Same calculation as the daily screens, with the week's net exercise spread
+      // evenly over the 7 days.
+      const weeklyRequirements = calcRequirements(energyProfile, exerciseCaloriesTotal / 7);
+      const recommendedDaily = weeklyRequirements.ok
+        ? {
+            calories: weeklyRequirements.value.energy,
+            protein: weeklyRequirements.value.proteinG,
+            proteinRda: weeklyRequirements.value.proteinRda,
+            fat: weeklyRequirements.value.fatG,
+            carbs: weeklyRequirements.value.carbsG,
+            salt: weeklyRequirements.value.saltMaxG,
+          }
+        : null;
+
       const analysisResponse = await fetch('/api/weekly-summary', {
         method: 'POST',
         headers: {
@@ -1362,13 +1360,7 @@ export default function HomePage() {
           periodEnd,
           averages,
           exerciseCaloriesTotal: round1(exerciseCaloriesTotal),
-          recommendedDaily: {
-            calories: recommended.kcal,
-            protein: recommended.protein,
-            fat: recommendedFatGrams,
-            carbs: recommendedCarbsGrams,
-            salt: recommended.salt,
-          },
+          recommendedDaily,
           healthTrend: healthRecords.map((item) => ({
             date: item.date,
             weight: item.weight,
@@ -2487,7 +2479,7 @@ export default function HomePage() {
               { id: 'meal', value: `${totals.calories.toFixed(0)} kcal` },
               { id: 'exercise', value: `-${exerciseCalories.toFixed(0)} kcal` },
               { id: 'health', value: healthForDate?.weight != null ? `${healthForDate.weight.toFixed(1)} kg` : '未記録' },
-              { id: 'summary', value: `差 ${(totals.calories - estimatedEnergy).toFixed(0)} kcal` },
+              { id: 'summary', value: dayRequirements ? `差 ${(totals.calories - dayRequirements.energy).toFixed(0)} kcal` : '目標を計算できません' },
               { id: 'settings', value: 'プロフィール' },
             ] as Array<{ id: AppView; value: string }>).map((tile) => {
               const meta = APP_VIEWS.find((v) => v.id === tile.id);
@@ -3150,35 +3142,42 @@ export default function HomePage() {
           {totals.absorbedPhosphorus >= phosphorusWarningThreshold ? (
             <p><small className="weekly-summary-error">リン摂取量が上限に近づいています</small></p>
           ) : null}
-          <div className="summary-item">
-            <span>基礎代謝の目安</span>
-            <strong>{basalMetabolism.toFixed(0)} kcal</strong>
-          </div>
-          <div className="summary-item">
-            <span>運動による消費カロリー</span>
-            <strong>{exerciseCalories.toFixed(0)} kcal</strong>
-          </div>
-          <div className="summary-item">
-            <span>総消費カロリー（基礎代謝＋運動）</span>
-            <strong>{totalConsumptionCalories.toFixed(0)} kcal</strong>
-          </div>
-          <div className="summary-item">
-            <span>推定エネルギー必要量</span>
-            <strong>{estimatedEnergy.toFixed(0)} kcal</strong>
-          </div>
-          <div className="summary-item">
-            <span>推奨（DRI 2025 暫定）</span>
-            <strong>
-              {recommended.kcal} kcal / P:{recommended.protein}g 
-              F: {recommendedFatGrams}g 
-              C: {recommendedCarbsGrams}g 
-              Na: {recommended.salt}g
-            </strong>
-          </div>
-          <div className="summary-item">
-            <span>必要量との差</span>
-            <strong>{(totals.calories - estimatedEnergy).toFixed(0)} kcal</strong>
-          </div>
+          {dayRequirements ? (
+            <>
+              <div className="summary-item summary-item-stacked">
+                <span>エネルギー必要量</span>
+                <strong>{dayRequirements.energy.toLocaleString()} kcal</strong>
+                <small>
+                  基礎代謝 {Math.round(dayRequirements.bmr).toLocaleString()} × 身体活動レベル {dayRequirements.pal.toFixed(2)}
+                  ＝ {dayRequirements.baseEnergy.toLocaleString()} ＋ 運動（正味） {dayRequirements.exerciseNet.toLocaleString()}
+                </small>
+              </div>
+              <div className="summary-item">
+                <span>必要量との差</span>
+                <strong>{(totals.calories - dayRequirements.energy).toFixed(0)} kcal</strong>
+              </div>
+              <div className="summary-item summary-item-stacked">
+                <span>目標</span>
+                <strong>
+                  P {dayRequirements.proteinG}g（{dayRequirements.proteinPct}%） / F {dayRequirements.fatG}g（{dayRequirements.fatPct}%） / C {dayRequirements.carbsG}g（{dayRequirements.carbsPct}%） / 食塩 {dayRequirements.saltMaxG}g未満
+                </strong>
+              </div>
+              <div className="summary-item">
+                <span>たんぱく質の推奨量（確認用）</span>
+                <strong className={totals.protein < dayRequirements.proteinRda ? 'summary-value-warning' : undefined}>
+                  {dayRequirements.proteinRda}g以上（摂取 {totals.protein.toFixed(1)}g{totals.protein < dayRequirements.proteinRda ? '・下回っています' : ''}）
+                </strong>
+              </div>
+              {dayRequirements.warnings.map((warning) => (
+                <p key={warning}><small className="weekly-summary-error">{warning}</small></p>
+              ))}
+            </>
+          ) : (
+            <div className="summary-item summary-item-stacked">
+              <span>エネルギー必要量・目標</span>
+              <small className="weekly-summary-error">{requirements.ok ? '' : requirements.reason}</small>
+            </div>
+          )}
           {(() => {
             const st = saveStates['daily-note'] ?? 'idle';
             return (
@@ -3306,9 +3305,9 @@ export default function HomePage() {
               </div>
             </div>
           ) : null}
-          <p><small>グラフの赤い棒は運動記録に入力した消費カロリーのみで、基礎代謝は含みません。</small></p>
+          <p><small>カロリーのグラフの必要量は「基礎代謝×身体活動レベル」（緑）と、その日の運動（正味、ピンク）を積み上げたものです。</small></p>
           <div className="chart-wrapper">
-            <NutritionChart totals={totals} profile={profile} consumptionCalories={exerciseCalories} totalConsumptionCalories={totalConsumptionCalories} date={dateFilter} />
+            <NutritionChart totals={totals} requirements={dayRequirements} date={dateFilter} />
           </div>
         </div>
 
