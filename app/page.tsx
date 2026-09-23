@@ -401,6 +401,12 @@ const writeStoredHeight = (height: number | null) => {
   }
 };
 
+// '2026-09-22' → '9/22'
+const formatMonthDay = (date: string) => {
+  const [, month, day] = date.split('-');
+  return month && day ? `${Number(month)}/${Number(day)}` : date;
+};
+
 // Per-entry calories above these are almost always typos (e.g. 400 → 4000).
 // They are not blocked: the user is asked to confirm before saving.
 const UNUSUAL_EXERCISE_KCAL = 2000;
@@ -469,7 +475,10 @@ export default function HomePage() {
   // Guards against a slow fetch for a previously selected date overwriting the
   // note of the date the user has since switched to.
   const dailyNoteRequestRef = useRef('');
-  const [healthToday, setHealthToday] = useState<HealthRecord | null>(null);
+  // Health record of the date selected in 日次集計 (what the health form edits).
+  const [healthForDate, setHealthForDate] = useState<HealthRecord | null>(null);
+  const [healthForDateLoading, setHealthForDateLoading] = useState(false);
+  const healthRequestRef = useRef('');
   const [savedHeight, setSavedHeight] = useState<number | null>(null);
   const [healthStatusMessage, setHealthStatusMessage] = useState('');
   const [healthTrendRange, setHealthTrendRange] = useState<HealthTrendRange>(7);
@@ -681,6 +690,12 @@ export default function HomePage() {
     if (!healthTrendOpen) return;
     void loadHealthTrend(healthTrendRange);
   }, [healthTrendRange, healthTrendOpen]);
+
+  // The health form edits the record of the selected date.
+  useEffect(() => {
+    setHealthStatusMessage('');
+    void loadHealthForDate(dateFilter);
+  }, [dateFilter]);
 
   // Notes are per-day: reload whenever the selected date changes.
   useEffect(() => {
@@ -915,15 +930,10 @@ export default function HomePage() {
     }
 
     const rows = (data || []).map(mapHealthRecord);
-    const latestByDate = new Map<string, HealthRecord>();
-    rows.forEach((row) => {
-      if (!latestByDate.has(row.date)) {
-        latestByDate.set(row.date, row);
-      }
-    });
 
     // Height is stored in localStorage; fall back to (and migrate from) any
-    // height previously saved to the database for existing users.
+    // height previously saved to the database for existing users. The per-day
+    // values are loaded separately by loadHealthForDate.
     const stored = readStoredHeight();
     const dbHeight = rows.find((row) => row.height != null)?.height ?? null;
     const effectiveHeight = stored ?? dbHeight;
@@ -931,23 +941,56 @@ export default function HomePage() {
       writeStoredHeight(effectiveHeight);
     }
     setSavedHeight(effectiveHeight);
+    setHealthForm((prev) => ({
+      ...prev,
+      height: effectiveHeight == null ? prev.height : String(effectiveHeight),
+    }));
+  };
 
-    const todayRecord = latestByDate.get(today) || null;
-    setHealthToday(todayRecord);
+  // Health records are per-day like notes: the form shows and edits the record of
+  // the given date. Height is not per-day, so the form keeps its current value.
+  const loadHealthForDate = async (date: string) => {
+    healthRequestRef.current = date;
+    // Clear first so values of the previously selected date can never be saved
+    // under the new one while the fetch is in flight.
+    setHealthForDate(null);
+    setHealthForm((prev) => ({ ...prev, weight: '', bodyFat: '', systolicBp: '', diastolicBp: '', pulse: '' }));
 
-    if (todayRecord) {
-      setHealthForm({
-        weight: todayRecord.weight == null ? '' : String(todayRecord.weight),
-        bodyFat: todayRecord.bodyFat == null ? '' : String(todayRecord.bodyFat),
-        height: effectiveHeight != null ? String(effectiveHeight) : (todayRecord.height == null ? '' : String(todayRecord.height)),
-        systolicBp: todayRecord.systolicBp == null ? '' : String(todayRecord.systolicBp),
-        diastolicBp: todayRecord.diastolicBp == null ? '' : String(todayRecord.diastolicBp),
-        pulse: todayRecord.pulse == null ? '' : String(todayRecord.pulse),
-      });
-    } else {
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    setHealthForDateLoading(true);
+    const { data, error } = await supabase
+      .from('health_records')
+      .select('id,date,weight,body_fat,muscle_mass,bone_mass,metabolic_age,height,bmi,systolic_bp,diastolic_bp,pulse,created_at')
+      .eq('date', date)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    // Ignore the response if the user already moved to another date.
+    if (healthRequestRef.current !== date) {
+      return;
+    }
+
+    setHealthForDateLoading(false);
+
+    if (error) {
+      console.error('[health] fetch for date failed', error);
+      setHealthStatusMessage(`健康記録の読み込みに失敗しました: ${formatSupabaseError(error)}`);
+      return;
+    }
+
+    const record = data && data[0] ? mapHealthRecord(data[0]) : null;
+    setHealthForDate(record);
+    if (record) {
       setHealthForm((prev) => ({
         ...prev,
-        height: effectiveHeight == null ? prev.height : String(effectiveHeight),
+        weight: record.weight == null ? '' : String(record.weight),
+        bodyFat: record.bodyFat == null ? '' : String(record.bodyFat),
+        systolicBp: record.systolicBp == null ? '' : String(record.systolicBp),
+        diastolicBp: record.diastolicBp == null ? '' : String(record.diastolicBp),
+        pulse: record.pulse == null ? '' : String(record.pulse),
       }));
     }
   };
@@ -1042,18 +1085,22 @@ export default function HomePage() {
     }
 
     if (weight == null && bodyFat == null && systolicBp == null && diastolicBp == null && pulse == null) {
-      setHealthStatusMessage('体重・体脂肪率・血圧・脈拍のいずれかを入力してください。');
+      setHealthStatusMessage(
+        healthForDate
+          ? '体重・体脂肪率・血圧・脈拍のいずれかを入力してください。記録を消す場合は「この日の記録を削除」を使ってください。'
+          : '体重・体脂肪率・血圧・脈拍のいずれかを入力してください。'
+      );
       return false;
     }
 
     setHealthStatusMessage('');
 
+    const date = dateFilter;
     try {
-      const today = toJstDateString();
       const { data: existingRows, error: existingError } = await supabase
         .from('health_records')
         .select('id,date,created_at')
-        .eq('date', today)
+        .eq('date', date)
         .order('created_at', { ascending: false })
         .limit(1);
 
@@ -1062,7 +1109,7 @@ export default function HomePage() {
       }
 
       const payload = {
-        date: today,
+        date,
         weight,
         body_fat: bodyFat,
         height,
@@ -1080,12 +1127,12 @@ export default function HomePage() {
         if (error) throw error;
       }
 
-      setHealthStatusMessage('記録しました');
+      setHealthStatusMessage(`${formatMonthDay(date)}の記録を保存しました`);
       if (height != null) {
         setSavedHeight(height);
         writeStoredHeight(height);
       }
-      await loadHealthRecords();
+      await loadHealthForDate(date);
       await loadLatestHealthWeight();
       if (healthTrendOpen) {
         await loadHealthTrend(healthTrendRange);
@@ -1094,6 +1141,37 @@ export default function HomePage() {
     } catch (error) {
       console.error('[health] save failed', error);
       setHealthStatusMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
+      return false;
+    }
+  };
+
+  const deleteHealthRecord = async (): Promise<boolean> => {
+    if (!isSupabaseConfigured) {
+      setHealthStatusMessage('Supabase が未設定のため削除できません。');
+      return false;
+    }
+
+    const date = dateFilter;
+    try {
+      // Legacy data can hold several rows per date; remove them all. Ask for the
+      // deleted rows back so a delete that matched nothing is not reported as done.
+      const { data, error } = await supabase.from('health_records').delete().eq('date', date).select('id');
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        setHealthStatusMessage('削除できませんでした。画面を再読み込みしてお試しください。');
+        return false;
+      }
+
+      setHealthStatusMessage(`${formatMonthDay(date)}の記録を削除しました`);
+      await loadHealthForDate(date);
+      await loadLatestHealthWeight();
+      if (healthTrendOpen) {
+        await loadHealthTrend(healthTrendRange);
+      }
+      return true;
+    } catch (error) {
+      console.error('[health] delete failed', error);
+      setHealthStatusMessage(`削除に失敗しました: ${formatSupabaseError(error)}`);
       return false;
     }
   };
@@ -2667,15 +2745,47 @@ export default function HomePage() {
         </div>
         {(() => {
           const st = saveStates['health'] ?? 'idle';
+          const deleteSt = saveStates['health-delete'] ?? 'idle';
+          const dateLabel = formatMonthDay(dateFilter);
+          const isToday = dateFilter === toJstDateString();
+          const busy = healthForDateLoading || st === 'saving' || deleteSt === 'saving';
           return (
-            <button
-              className={`button-primary health-save-button save-feedback-button save-feedback-button-${st}`}
-              type="button"
-              disabled={st === 'saving'}
-              onClick={() => { void runSave('health', saveDailyHealthRecord); }}
-            >
-              {st === 'saving' ? '記録中...' : st === 'success' ? '✓ 記録しました' : st === 'error' ? '記録に失敗しました' : '記録する'}
-            </button>
+            <>
+              {isToday ? null : (
+                <p className="health-date-note">
+                  <small>今日以外の日（{dateLabel}）の記録を表示しています。日付は「日次集計」で変更できます。</small>
+                </p>
+              )}
+              <div className="health-actions">
+                <button
+                  className={`button-primary health-save-button save-feedback-button save-feedback-button-${st}`}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { void runSave('health', saveDailyHealthRecord); }}
+                >
+                  {st === 'saving'
+                    ? '記録中...'
+                    : st === 'success'
+                      ? '✓ 記録しました'
+                      : st === 'error'
+                        ? '記録に失敗しました'
+                        : `${dateLabel}${isToday ? '（今日）' : ''}の記録として保存`}
+                </button>
+                {healthForDate ? (
+                  <button
+                    className="button-danger health-delete-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      if (!window.confirm(`${dateLabel}の健康記録を削除しますか？`)) return;
+                      void runSave('health-delete', deleteHealthRecord);
+                    }}
+                  >
+                    {deleteSt === 'saving' ? '削除中...' : 'この日の記録を削除'}
+                  </button>
+                ) : null}
+              </div>
+            </>
           );
         })()}
         {healthStatusMessage ? <p><small>{healthStatusMessage}</small></p> : null}
@@ -2708,12 +2818,12 @@ export default function HomePage() {
           <strong>{totals.salt.toFixed(1)} g</strong>
         </div>
         <div className="summary-item">
-          <span>本日の体重</span>
-          <strong>{healthToday?.weight != null ? `${healthToday.weight.toFixed(1)} kg` : '未記録'}</strong>
+          <span>体重</span>
+          <strong>{healthForDate?.weight != null ? `${healthForDate.weight.toFixed(1)} kg` : '未記録'}</strong>
         </div>
         <div className="summary-item">
-          <span>本日の血圧</span>
-          <strong>{healthToday?.systolicBp != null && healthToday?.diastolicBp != null ? `${healthToday.systolicBp}/${healthToday.diastolicBp} mmHg` : '未記録'}</strong>
+          <span>血圧</span>
+          <strong>{healthForDate?.systolicBp != null && healthForDate?.diastolicBp != null ? `${healthForDate.systolicBp}/${healthForDate.diastolicBp} mmHg` : '未記録'}</strong>
         </div>
         <div className="summary-item">
           <span>吸収リン合計</span>
