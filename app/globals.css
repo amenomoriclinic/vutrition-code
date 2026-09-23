@@ -688,6 +688,36 @@ small {
   color: #475569;
 }
 
+.estimate-section-label {
+  margin: 8px 0 4px;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.estimate-label-notes {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.estimate-label-notes small {
+  color: #475569;
+}
+
+.estimate-label-notes small.estimate-label-warning,
+.estimate-label-warning {
+  display: block;
+  color: #b45309;
+  font-weight: 700;
+}
+
+.estimate-base-weight-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* "食品を追加" tap feedback: saving (grey) → success (green ✓) → error (red). */
 .add-food-button {
   transition: background-color 160ms ease, color 160ms ease;

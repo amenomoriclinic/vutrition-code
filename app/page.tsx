@@ -45,6 +45,17 @@ type EditableEstimate = NutritionEstimate & {
   baseCarbs: number;
   baseSalt: number;
   basePhosphorus: number;
+  // Weight/volume of one base piece or serving when the label states it,
+  // e.g. "1パック(300g)あたり" → 300 g. Lets grams be converted to pieces and back.
+  baseWeight: number | null;
+  baseWeightUnit: 'g' | 'ml' | null;
+  // Where the label's salt value came from: printed 食塩相当量, converted from
+  // ナトリウム, or not printed at all. Absent for photo/text estimates.
+  saltSource?: 'label' | 'sodium' | 'missing';
+  sodiumMg?: number | null;
+  // True when the eaten amount's unit cannot be related to the label's unit
+  // (e.g. grams for a "1パックあたり" label without the pack weight).
+  conversionError?: boolean;
 };
 
 type PendingFood = {
@@ -365,6 +376,42 @@ const labelDisplayUnitOptions: Record<LabelDisplayUnit, { label: string; baseAmo
   perPiece: { label: '1個（1本・1袋）あたり', baseAmount: 1, baseUnit: '個', defaultActualUnit: '個' },
   per100ml: { label: '100mlあたり', baseAmount: 100, baseUnit: 'ml', defaultActualUnit: 'ml' },
   perServing: { label: '1食分あたり', baseAmount: 1, baseUnit: '食分', defaultActualUnit: '食分' },
+};
+
+const isWeightUnit = (unit: LabelAmountUnit) => unit === 'g' || unit === 'ml';
+
+// How many label base amounts the eaten amount corresponds to:
+//   250g of a "100gあたり" label → 2.5
+//   250g of a "1パック(300g)あたり" label → 250 / 300 (needs the pack weight)
+// g and ml are treated alike (≈1 g/ml), as are 個 and 食分. Returns null when
+// the units cannot be related, e.g. grams of a per-pack label without its weight,
+// or pieces of a per-100g label.
+const labelScale = (
+  actualAmount: number,
+  actualUnit: LabelAmountUnit,
+  baseAmount: number,
+  baseUnit: LabelAmountUnit,
+  baseWeight: number | null,
+): number | null => {
+  const actualIsWeight = isWeightUnit(actualUnit);
+  if (actualIsWeight === isWeightUnit(baseUnit)) return actualAmount / baseAmount;
+  if (actualIsWeight && baseWeight && baseWeight > 0) return actualAmount / baseWeight;
+  return null;
+};
+
+// 食塩相当量 above this per 100 g is almost certainly a sodium value in mg read as
+// grams (the saltiest everyday foods, like soy sauce, are ~15 g per 100 g).
+const SUSPICIOUS_SALT_PER_100G = 20;
+
+const isSuspiciousLabelSalt = (estimate: {
+  baseSalt: number;
+  baseAmount: number;
+  baseUnit: LabelAmountUnit;
+  baseWeight: number | null;
+}) => {
+  const grams = isWeightUnit(estimate.baseUnit) ? estimate.baseAmount : estimate.baseWeight;
+  const per100 = grams && grams > 0 ? (estimate.baseSalt / grams) * 100 : estimate.baseSalt;
+  return per100 > SUSPICIOUS_SALT_PER_100G;
 };
 
 // Options offered in the "実際に食べた量" unit selector.
@@ -874,6 +921,8 @@ export default function HomePage() {
   }, []);
 
   const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
+  // 食塩相当量 is printed to 0.01 g on labels (e.g. 0.04 g), so it keeps two decimals.
+  const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
   const formatSupabaseError = (error: any) => {
     if (!error) return '不明なエラー';
@@ -1465,18 +1514,27 @@ export default function HomePage() {
     const baseAmount = Math.max(0.0001, Number(estimate.baseAmount) || 1);
     const rawActual = Number(estimate.actualAmount);
     const actualAmount = Number.isFinite(rawActual) && rawActual > 0 ? rawActual : baseAmount;
-    const scale = actualAmount / baseAmount;
+    // Labels relate units (250g of a "1パック(300g)あたり" label); photo/text
+    // estimates keep the plain ratio they always used.
+    const scale = estimate.mode === 'label'
+      ? labelScale(actualAmount, estimate.actualUnit, baseAmount, estimate.baseUnit, estimate.baseWeight)
+      : actualAmount / baseAmount;
+    if (scale == null) {
+      // Keep the previous values but block saving until the unit can be converted.
+      return { ...estimate, baseAmount, actualAmount, conversionError: true };
+    }
     return {
       ...estimate,
       baseAmount,
       actualAmount,
+      conversionError: false,
       quantity: 1,
       multiplier: round1(scale),
       calories: round1(estimate.baseCalories * scale),
       protein: round1(estimate.baseProtein * scale),
       fat: round1(estimate.baseFat * scale),
       carbs: round1(estimate.baseCarbs * scale),
-      salt: round1(estimate.baseSalt * scale),
+      salt: round2(estimate.baseSalt * scale),
       phosphorus: round1(estimate.basePhosphorus * scale),
     };
   };
@@ -1658,6 +1716,10 @@ export default function HomePage() {
         let estimateResponse: NutritionEstimate;
         let estBaseAmount: number;
         let estBaseUnit: LabelAmountUnit;
+        let labelExtras: Pick<EditableEstimate, 'baseWeight' | 'baseWeightUnit' | 'saltSource' | 'sodiumMg'> = {
+          baseWeight: null,
+          baseWeightUnit: null,
+        };
         if (result.estimate.mode === 'label') {
           // Claude reads the label's own display unit (100gあたり / 1個あたり / 100mlあたり ...).
           estBaseAmount = Math.max(0.1, Number(result.estimate.baseAmount) || Number(item.labelBaseAmount) || 100);
@@ -1675,6 +1737,14 @@ export default function HomePage() {
             phosphorusAbsorptionRate: pickPhosphorusAbsorptionRate(result.estimate, 0.85),
             description: `${item.description ? `${item.description} ` : ''}栄養表示: ${detectedAmountText}。下の「実際に食べた量」を入力すると栄養値が自動換算されます。`,
             imageUrl: item.previewUrl,
+          };
+          const detectedWeight = Number(result.estimate.baseWeight);
+          const detectedSodium = result.estimate.sodiumMg == null ? null : Number(result.estimate.sodiumMg);
+          labelExtras = {
+            baseWeight: Number.isFinite(detectedWeight) && detectedWeight > 0 ? detectedWeight : null,
+            baseWeightUnit: result.estimate.baseWeightUnit === 'ml' ? 'ml' : result.estimate.baseWeightUnit === 'g' ? 'g' : null,
+            saltSource: result.estimate.saltSource === 'sodium' || result.estimate.saltSource === 'missing' ? result.estimate.saltSource : 'label',
+            sodiumMg: detectedSodium != null && Number.isFinite(detectedSodium) ? detectedSodium : null,
           };
         } else {
           // Photo/text estimates already reflect the whole portion (base = 1 serving).
@@ -1713,6 +1783,7 @@ export default function HomePage() {
           baseCarbs: estimateResponse.carbs,
           baseSalt: estimateResponse.salt,
           basePhosphorus: estimateResponse.phosphorus,
+          ...labelExtras,
         }));
         successCount += 1;
       }
@@ -1763,7 +1834,7 @@ export default function HomePage() {
         baseProtein: round1(estimate.baseProtein * scale),
         baseFat: round1(estimate.baseFat * scale),
         baseCarbs: round1(estimate.baseCarbs * scale),
-        baseSalt: round1(estimate.baseSalt * scale),
+        baseSalt: round2(estimate.baseSalt * scale),
         basePhosphorus: round1(estimate.basePhosphorus * scale),
       });
     }));
@@ -1789,7 +1860,7 @@ export default function HomePage() {
         protein: round1(target.protein),
         fat: round1(target.fat),
         carbs: round1(target.carbs),
-        salt: round1(target.salt),
+        salt: round2(target.salt),
         phosphorus: round1(target.phosphorus),
         phosphorus_absorption_rate: clampPhosphorusAbsorptionRate(target.phosphorusAbsorptionRate),
         multiplier: round1((target.quantity || 1) * (target.multiplier || 1)),
@@ -2028,10 +2099,10 @@ export default function HomePage() {
     }
 
     // Blank nutrient fields count as 0; anything non-numeric or negative is rejected.
-    const parseAmount = (raw: string) => {
+    const parseAmount = (raw: string, round: (n: number) => number = round1) => {
       if (!raw.trim()) return 0;
       const value = Number(raw);
-      return Number.isFinite(value) && value >= 0 ? round1(value) : null;
+      return Number.isFinite(value) && value >= 0 ? round(value) : null;
     };
 
     const calories = parseAmount(draft.calories);
@@ -2049,7 +2120,7 @@ export default function HomePage() {
       const protein = parseAmount(draft.protein);
       const fat = parseAmount(draft.fat);
       const carbs = parseAmount(draft.carbs);
-      const salt = parseAmount(draft.salt);
+      const salt = parseAmount(draft.salt, round2);
       const phosphorus = parseAmount(draft.phosphorus);
       if (protein == null || fat == null || carbs == null || salt == null || phosphorus == null) {
         setRecordEditMessage('栄養素の値を正しく入力してください。');
@@ -2140,7 +2211,7 @@ export default function HomePage() {
               {numberField('protein', 'P(g)', '0.1')}
               {numberField('fat', 'F(g)', '0.1')}
               {numberField('carbs', 'C(g)', '0.1')}
-              {numberField('salt', '塩分(g)', '0.1')}
+              {numberField('salt', '食塩相当量(g)', '0.01')}
               {numberField('phosphorus', 'リン(mg)', '1')}
             </>
           )}
@@ -2181,7 +2252,7 @@ export default function HomePage() {
       protein: round1(record.protein * ratio),
       fat: round1(record.fat * ratio),
       carbs: round1(record.carbs * ratio),
-      salt: round1(record.salt * ratio),
+      salt: round2(record.salt * ratio),
       phosphorus: round1(record.phosphorus * ratio),
     };
   };
@@ -2682,6 +2753,9 @@ export default function HomePage() {
                       <input value={estimate.amountText} onChange={(e) => updateEstimateAmountText(estimate.tempId, e.target.value)} />
                     </label>
                   </div>
+                  {estimate.mode === 'label' ? (
+                    <p className="estimate-section-label">読み取った値（{estimate.amountText}）</p>
+                  ) : null}
                   <div className="estimate-nutrients-grid">
                     <label className="estimate-inline-field">
                       <span>kcal</span>
@@ -2700,8 +2774,8 @@ export default function HomePage() {
                       <input type="number" value={estimate.baseCarbs} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseCarbs: Number(e.target.value) || 0 })} />
                     </label>
                     <label className="estimate-inline-field">
-                      <span>塩(g)</span>
-                      <input type="number" step="0.1" value={estimate.baseSalt} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
+                      <span>食塩相当量(g)</span>
+                      <input type="number" step="0.01" value={estimate.baseSalt} onFocus={(e) => e.target.select()} onChange={(e) => updateEstimate(estimate.tempId, { baseSalt: Number(e.target.value) || 0 })} />
                     </label>
                     <label className="estimate-inline-field">
                       <span>リン(mg)</span>
@@ -2720,6 +2794,47 @@ export default function HomePage() {
                       />
                     </label>
                   </div>
+                  {estimate.mode === 'label' ? (
+                    <div className="estimate-label-notes">
+                      {estimate.saltSource === 'sodium' ? (
+                        <small>
+                          食塩相当量: ラベルのナトリウム {estimate.sodiumMg}mg から換算しました（ナトリウムmg × 2.54 ÷ 1000）。
+                        </small>
+                      ) : estimate.saltSource === 'missing' ? (
+                        <small className="estimate-label-warning">
+                          ラベルに食塩相当量・ナトリウムの表示が見つかりませんでした。必要なら食塩相当量(g)を入力してください。
+                        </small>
+                      ) : (
+                        <small>食塩相当量: ラベルの表示どおりです。</small>
+                      )}
+                      {isSuspiciousLabelSalt(estimate) ? (
+                        <small className="estimate-label-warning">
+                          食塩相当量が100gあたり{SUSPICIOUS_SALT_PER_100G}gを超えています。ナトリウム(mg)の値を食塩相当量(g)として読み取っていないか確認してください。
+                        </small>
+                      ) : null}
+                      {!isWeightUnit(estimate.baseUnit) ? (
+                        <label className="estimate-inline-field estimate-base-weight">
+                          <span>「{estimate.amountText}」の重さ</span>
+                          <span className="estimate-base-weight-input">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              inputMode="decimal"
+                              value={estimate.baseWeight ?? ''}
+                              placeholder="未入力"
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => {
+                                const value = Number(e.target.value);
+                                updateEstimate(estimate.tempId, { baseWeight: e.target.value && value > 0 ? value : null });
+                              }}
+                            />
+                            {estimate.baseWeightUnit ?? 'g'}
+                          </span>
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="estimate-actual-amount">
                     <span className="estimate-actual-label">実際に食べた量</span>
                     <div className="estimate-actual-controls">
@@ -2741,13 +2856,25 @@ export default function HomePage() {
                         ))}
                       </select>
                     </div>
-                    <small className="estimate-actual-hint">
-                      上の栄養値「{estimate.baseAmount}{estimate.baseUnit}あたり」を基準に自動換算（現在 ×{estimate.multiplier}）
-                    </small>
+                    {estimate.conversionError ? (
+                      <small className="estimate-label-warning">
+                        {isWeightUnit(estimate.actualUnit)
+                          ? `「${estimate.amountText}」の重さを上に入力すると、${estimate.actualUnit}で換算できます。`
+                          : `この表示は「${estimate.amountText}」なので、食べた量は g か ml で入力してください。`}
+                      </small>
+                    ) : (
+                      <small className="estimate-actual-hint">
+                        上の栄養値「{estimate.mode === 'label' ? estimate.amountText : `${estimate.baseAmount}${estimate.baseUnit}あたり`}」を基準に自動換算（現在 ×{estimate.multiplier}）
+                      </small>
+                    )}
                   </div>
                   <div className="summary-item" style={{ marginTop: 8 }}>
-                    <span>再計算後</span>
-                    <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 塩 {estimate.salt.toFixed(1)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
+                    <span>{estimate.mode === 'label' ? `換算結果（${estimate.actualAmount}${estimate.actualUnit}）` : '再計算後'}</span>
+                    {estimate.conversionError ? (
+                      <strong className="estimate-label-warning">換算できません</strong>
+                    ) : (
+                      <strong>{estimate.calories.toFixed(1)} kcal / P {estimate.protein.toFixed(1)}g / F {estimate.fat.toFixed(1)}g / C {estimate.carbs.toFixed(1)}g / 食塩 {estimate.salt.toFixed(2)}g / 吸収リン {(estimate.phosphorus * estimate.phosphorusAbsorptionRate).toFixed(1)}mg</strong>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2759,6 +2886,10 @@ export default function HomePage() {
                   className={`button-primary save-feedback-button save-feedback-button-${st}`}
                   type="button"
                   onClick={() => {
+                    if (estimates.some((estimate) => estimate.conversionError)) {
+                      setStatusMessage('量を換算できない推定結果があります。各カードの案内に沿って入力してください。');
+                      return;
+                    }
                     if (!confirmUnusualMealCalories(estimates)) return;
                     void runSave('meal', saveAllEstimates);
                   }}
@@ -3172,7 +3303,7 @@ export default function HomePage() {
               {recommended.kcal} kcal / P:{recommended.protein}g 
               F: {recommendedFatGrams}g 
               C: {recommendedCarbsGrams}g 
-              Na: {recommended.salt}g
+              食塩: {recommended.salt}g
             </strong>
           </div>
           <div className="summary-item">
