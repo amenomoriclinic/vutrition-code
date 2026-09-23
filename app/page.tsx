@@ -72,6 +72,18 @@ type NutritionRecord = NutritionEstimate & {
   source: 'photo' | 'favorite' | 'exercise';
 };
 
+// Raw input strings of the inline edit form for a saved record.
+type RecordEditDraft = {
+  name: string;
+  amountText: string;
+  calories: string;
+  protein: string;
+  fat: string;
+  carbs: string;
+  salt: string;
+  phosphorus: string;
+};
+
 type FavoriteFood = {
   id: string;
   name: string;
@@ -414,6 +426,10 @@ export default function HomePage() {
   const [addFoodCount, setAddFoodCount] = useState(0);
   const addFoodResetTimer = useRef<number | null>(null);
   const [recordMultiplierDrafts, setRecordMultiplierDrafts] = useState<Record<string, string>>({});
+  // Only one saved record is edited at a time.
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [recordEditDraft, setRecordEditDraft] = useState<RecordEditDraft | null>(null);
+  const [recordEditMessage, setRecordEditMessage] = useState('');
   const [bulkRecordSaveState, setBulkRecordSaveState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [bulkRecordSaveCount, setBulkRecordSaveCount] = useState(0);
   const [weeklySummaryLoading, setWeeklySummaryLoading] = useState(false);
@@ -1773,12 +1789,192 @@ export default function HomePage() {
         }
         setRecords((prev) => prev.filter((record) => record.id !== id));
         clearMultiplierOverride(id);
+        if (editingRecordId === id) {
+          cancelEditRecord();
+        }
         setStatusMessage('記録を削除しました。');
       } catch (e) {
         console.error(e);
         setStatusMessage('削除中にエラーが発生しました。');
       }
     })();
+  };
+
+  const startEditRecord = (record: NutritionRecord) => {
+    setEditingRecordId(record.id);
+    setRecordEditMessage('');
+    setRecordEditDraft({
+      name: record.name,
+      amountText: record.amountText || '',
+      calories: String(record.calories),
+      protein: String(record.protein),
+      fat: String(record.fat),
+      carbs: String(record.carbs),
+      salt: String(record.salt),
+      phosphorus: String(record.phosphorus),
+    });
+  };
+
+  const cancelEditRecord = () => {
+    setEditingRecordId(null);
+    setRecordEditDraft(null);
+    setRecordEditMessage('');
+  };
+
+  const saveRecordEdit = async (): Promise<boolean> => {
+    const id = editingRecordId;
+    const draft = recordEditDraft;
+    const currentRecord = records.find((record) => record.id === id);
+    if (!id || !draft || !currentRecord) {
+      return false;
+    }
+
+    if (!isSupabaseConfigured) {
+      setRecordEditMessage('Supabase 未設定で保存できません。');
+      return false;
+    }
+
+    const exercise = isExerciseRecord(currentRecord);
+    const name = draft.name.trim();
+    if (!name) {
+      setRecordEditMessage('名前を入力してください。');
+      return false;
+    }
+
+    // Blank nutrient fields count as 0; anything non-numeric or negative is rejected.
+    const parseAmount = (raw: string) => {
+      if (!raw.trim()) return 0;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? round1(value) : null;
+    };
+
+    const calories = parseAmount(draft.calories);
+    if (calories == null || (exercise && calories <= 0)) {
+      setRecordEditMessage(exercise ? '消費カロリーを正しく入力してください。' : 'カロリーを正しく入力してください。');
+      return false;
+    }
+
+    let patch: Partial<NutritionRecord>;
+    let payload: Record<string, unknown>;
+    if (exercise) {
+      patch = { name, calories };
+      payload = { name, calories };
+    } else {
+      const protein = parseAmount(draft.protein);
+      const fat = parseAmount(draft.fat);
+      const carbs = parseAmount(draft.carbs);
+      const salt = parseAmount(draft.salt);
+      const phosphorus = parseAmount(draft.phosphorus);
+      if (protein == null || fat == null || carbs == null || salt == null || phosphorus == null) {
+        setRecordEditMessage('栄養素の値を正しく入力してください。');
+        return false;
+      }
+      const amountText = draft.amountText.trim();
+      patch = { name, amountText, calories, protein, fat, carbs, salt, phosphorus };
+      // The edited values are final amounts; store the multiplier currently shown
+      // alongside them so a pending local multiplier override is not re-applied.
+      payload = {
+        name,
+        amount_text: amountText || null,
+        calories,
+        protein,
+        fat,
+        carbs,
+        salt,
+        phosphorus,
+        multiplier: currentRecord.multiplier,
+      };
+    }
+
+    try {
+      // Same as delete: ask for the row back so an update that matched nothing is not
+      // reported as saved.
+      const { data, error } = await supabase.from('nutrition_records').update(payload).eq('id', id).select('id');
+      if (error) {
+        console.error('Supabase update error', error);
+        setRecordEditMessage(`保存に失敗しました: ${formatSupabaseError(error)}`);
+        return false;
+      }
+      if (!data || data.length === 0) {
+        setRecordEditMessage('保存できませんでした。画面を再読み込みしてお試しください。');
+        return false;
+      }
+    } catch (e) {
+      console.error(e);
+      setRecordEditMessage('保存中にエラーが発生しました。');
+      return false;
+    }
+
+    setRecords((prev) => prev.map((record) => (record.id === id ? { ...record, ...patch } : record)));
+    clearMultiplierOverride(id);
+    setRecordMultiplierDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    cancelEditRecord();
+    setStatusMessage(`${name} を修正しました。`);
+    return true;
+  };
+
+  const renderRecordEditForm = (record: NutritionRecord) => {
+    if (editingRecordId !== record.id || !recordEditDraft) {
+      return null;
+    }
+    const draft = recordEditDraft;
+    const exercise = isExerciseRecord(record);
+    const st = saveStates['record-edit'] ?? 'idle';
+    const setField = (key: keyof RecordEditDraft) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setRecordEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+    };
+    const numberField = (key: keyof RecordEditDraft, label: string, step: string) => (
+      <label className="record-edit-field">
+        <span>{label}</span>
+        <input type="number" min="0" step={step} inputMode="decimal" value={draft[key]} onChange={setField(key)} />
+      </label>
+    );
+
+    return (
+      <div className="record-edit-form">
+        <div className="record-edit-grid">
+          <label className="record-edit-field record-edit-field-wide">
+            <span>名前</span>
+            <input value={draft.name} onChange={setField('name')} />
+          </label>
+          {exercise ? (
+            numberField('calories', '消費kcal', '1')
+          ) : (
+            <>
+              <label className="record-edit-field record-edit-field-wide">
+                <span>量</span>
+                <input value={draft.amountText} onChange={setField('amountText')} />
+              </label>
+              {numberField('calories', 'kcal', '1')}
+              {numberField('protein', 'P(g)', '0.1')}
+              {numberField('fat', 'F(g)', '0.1')}
+              {numberField('carbs', 'C(g)', '0.1')}
+              {numberField('salt', '塩分(g)', '0.1')}
+              {numberField('phosphorus', 'リン(mg)', '1')}
+            </>
+          )}
+        </div>
+        <div className="record-edit-actions">
+          <button
+            type="button"
+            className={`button-primary record-edit-save save-feedback-button save-feedback-button-${st}`}
+            disabled={st === 'saving'}
+            onClick={() => { void runSave('record-edit', saveRecordEdit); }}
+          >
+            {st === 'saving' ? '保存中...' : st === 'error' ? '保存に失敗しました' : '修正を保存'}
+          </button>
+          <button type="button" className="button-secondary record-edit-cancel" disabled={st === 'saving'} onClick={cancelEditRecord}>
+            キャンセル
+          </button>
+        </div>
+        {recordEditMessage ? <small className="weekly-summary-error">{recordEditMessage}</small> : null}
+      </div>
+    );
   };
 
   const applyMultiplierToRecord = (record: NutritionRecord, nextMultiplier: number): NutritionRecord => {
@@ -2672,10 +2868,14 @@ export default function HomePage() {
                     <strong className="record-name">{record.name}</strong>
                     <span className="record-kcal">-{record.calories.toFixed(0)} kcal</span>
                   </div>
+                  <button type="button" className="button-secondary record-edit" aria-label="編集" disabled={editingRecordId === record.id} onClick={() => startEditRecord(record)}>
+                    編集
+                  </button>
                   <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
                     削除
                   </button>
                 </div>
+                {renderRecordEditForm(record)}
               </div>
             ))}
           </div>
@@ -2726,10 +2926,14 @@ export default function HomePage() {
                       }}
                     />
                   </label>
+                  <button type="button" className="button-secondary record-edit" aria-label="編集" disabled={editingRecordId === record.id} onClick={() => startEditRecord(record)}>
+                    編集
+                  </button>
                   <button type="button" className="button-danger record-delete" aria-label="削除" onClick={() => removeRecord(record.id)}>
                     削除
                   </button>
                 </div>
+                {renderRecordEditForm(record)}
               </div>
             ))}
           </div>
