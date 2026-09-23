@@ -95,6 +95,42 @@ main {
   border-radius: 10px;
 }
 
+.health-height-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.health-height-label {
+  margin: 0;
+  font-size: inherit;
+}
+
+.health-height-change,
+.health-height-confirm,
+.health-height-cancel {
+  padding: 2px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.health-height-confirm {
+  border-color: #0f766e;
+  background: #0f766e;
+  color: white;
+}
+
+.health-height-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
 .health-actions {
   display: flex;
   flex-wrap: wrap;

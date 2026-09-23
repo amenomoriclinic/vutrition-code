@@ -480,6 +480,9 @@ export default function HomePage() {
   const [healthForDateLoading, setHealthForDateLoading] = useState(false);
   const healthRequestRef = useRef('');
   const [savedHeight, setSavedHeight] = useState<number | null>(null);
+  // Once saved, the height field is locked until 変更 is pressed.
+  const [heightEditing, setHeightEditing] = useState(false);
+  const heightLocked = savedHeight != null && !heightEditing;
   const [healthStatusMessage, setHealthStatusMessage] = useState('');
   const [healthTrendRange, setHealthTrendRange] = useState<HealthTrendRange>(7);
   const [healthTrend, setHealthTrend] = useState<HealthRecord[]>([]);
@@ -1064,6 +1067,32 @@ export default function HomePage() {
     setProfile((prev) => (prev.weight === weight ? prev : { ...prev, weight }));
   };
 
+  const startHeightEdit = () => {
+    setHealthForm((prev) => ({ ...prev, height: savedHeight == null ? '' : String(savedHeight) }));
+    setHealthStatusMessage('');
+    setHeightEditing(true);
+  };
+
+  const cancelHeightEdit = () => {
+    setHealthForm((prev) => ({ ...prev, height: savedHeight == null ? '' : String(savedHeight) }));
+    setHeightEditing(false);
+  };
+
+  // Height lives in localStorage only, so confirming needs no database write.
+  // BMI of already saved days is left as it was recorded.
+  const confirmHeightEdit = () => {
+    const height = parseNullableNumber(healthForm.height);
+    if (height == null || height <= 0 || height >= 300) {
+      setHealthStatusMessage('身長(cm)を正しく入力してください。');
+      return;
+    }
+    setSavedHeight(height);
+    writeStoredHeight(height);
+    setHealthForm((prev) => ({ ...prev, height: String(height) }));
+    setHeightEditing(false);
+    setHealthStatusMessage(`身長を ${height} cm に変更しました。BMI はこれから保存する記録に反映されます。`);
+  };
+
   const saveDailyHealthRecord = async (): Promise<boolean> => {
     if (!isSupabaseConfigured) {
       setHealthStatusMessage('Supabase が未設定のため保存できません。');
@@ -1075,12 +1104,12 @@ export default function HomePage() {
     const systolicBp = parseNullableNumber(healthForm.systolicBp);
     const diastolicBp = parseNullableNumber(healthForm.diastolicBp);
     const pulse = parseNullableNumber(healthForm.pulse);
-    const heightInput = parseNullableNumber(healthForm.height);
-    const height = savedHeight ?? heightInput;
+    // While the height is being changed, the value in the field is used.
+    const height = heightLocked ? savedHeight : parseNullableNumber(healthForm.height);
     const bmi = calcBmi(weight, height);
 
-    if (savedHeight == null && height == null) {
-      setHealthStatusMessage('初回は身長(cm)を入力してください。');
+    if (height == null || height <= 0) {
+      setHealthStatusMessage(savedHeight == null ? '初回は身長(cm)を入力してください。' : '身長(cm)を入力してください。');
       return false;
     }
 
@@ -1128,10 +1157,9 @@ export default function HomePage() {
       }
 
       setHealthStatusMessage(`${formatMonthDay(date)}の記録を保存しました`);
-      if (height != null) {
-        setSavedHeight(height);
-        writeStoredHeight(height);
-      }
+      setSavedHeight(height);
+      writeStoredHeight(height);
+      setHeightEditing(false);
       await loadHealthForDate(date);
       await loadLatestHealthWeight();
       if (healthTrendOpen) {
@@ -2668,17 +2696,36 @@ export default function HomePage() {
       <div className="page-card">
         <h2 className="section-title">毎日の健康記録</h2>
         <div className="health-inline-grid">
-          <label className="health-inline-field">
-            身長cm
+          {/* A div rather than a label: the change/confirm buttons must not become the label's control. */}
+          <div className="health-inline-field">
+            <div className="health-height-head">
+              <label htmlFor="health-height-input" className="health-height-label">身長cm</label>
+              {savedHeight != null && !heightEditing ? (
+                <button type="button" className="health-height-change" onClick={startHeightEdit}>
+                  変更
+                </button>
+              ) : null}
+            </div>
             <input
+              id="health-height-input"
               type="number"
               step="0.1"
               min="0"
-              value={savedHeight != null ? String(savedHeight) : healthForm.height}
-              disabled={savedHeight != null}
+              value={heightLocked ? String(savedHeight) : healthForm.height}
+              disabled={heightLocked}
               onChange={(e) => setHealthForm((prev) => ({ ...prev, height: e.target.value }))}
             />
-          </label>
+            {heightEditing ? (
+              <div className="health-height-actions">
+                <button type="button" className="health-height-confirm" onClick={confirmHeightEdit}>
+                  確定
+                </button>
+                <button type="button" className="health-height-cancel" onClick={cancelHeightEdit}>
+                  取消
+                </button>
+              </div>
+            ) : null}
+          </div>
           <label className="health-inline-field">
             体重kg
             <input
@@ -2705,7 +2752,7 @@ export default function HomePage() {
               type="text"
               value={(() => {
                 const weight = parseNullableNumber(healthForm.weight);
-                const height = savedHeight ?? parseNullableNumber(healthForm.height);
+                const height = heightLocked ? savedHeight : parseNullableNumber(healthForm.height);
                 const bmi = calcBmi(weight, height);
                 return bmi == null ? '' : bmi.toFixed(1);
               })()}
