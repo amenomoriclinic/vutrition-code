@@ -81,6 +81,20 @@ create table if not exists public.favorite_foods (
 
 create index if not exists idx_favorite_foods_sort on public.favorite_foods(sort_order, created_at);
 
+-- Same access as nutrition_records and health_records: RLS on, with one policy
+-- allowing every operation (the app has no login and uses the anon key).
+-- drop + create keeps this file safe to run again.
+alter table public.favorite_foods enable row level security;
+
+drop policy if exists "Allow all operations on favorite_foods" on public.favorite_foods;
+create policy "Allow all operations on favorite_foods"
+  on public.favorite_foods
+  as permissive
+  for all
+  to public
+  using (true)
+  with check (true);
+
 alter table public.health_records
   add column if not exists body_fat numeric;
 
