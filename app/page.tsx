@@ -6,7 +6,7 @@ import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
 import FloatingButton from './components/FloatingButton';
 import HealthTrendChart, { HealthTrendRange } from './components/HealthTrendChart';
-import { ACTIVITY_LABELS, activityDescription, calcRequirements, netMetKcal, netRunningKcal, palFor } from '../lib/dri';
+import { ACTIVITY_LABELS, REQUIREMENT_SOURCES, activityDescription, calcRequirements, netMetKcal, netRunningKcal, palFor } from '../lib/dri';
 
 type Sex = 'male' | 'female';
 type ActivityLevel = 'low' | 'moderate' | 'high';
@@ -509,6 +509,8 @@ export default function HomePage() {
   const [healthForDateLoading, setHealthForDateLoading] = useState(false);
   const healthRequestRef = useRef('');
   const [savedHeight, setSavedHeight] = useState<number | null>(null);
+  // Height as typed in 設定; saved (and recalculated) once it is a plausible value.
+  const [profileHeightDraft, setProfileHeightDraft] = useState('');
   // Once saved, the height field is locked until 変更 is pressed.
   const [heightEditing, setHeightEditing] = useState(false);
   const heightLocked = savedHeight != null && !heightEditing;
@@ -820,6 +822,24 @@ export default function HomePage() {
     () => ({ age: profile.age, sex: profile.sex, weight: profile.weight, height: savedHeight, activity: profile.activity }),
     [profile, savedHeight]
   );
+
+  // Keep the 設定 height field in step with height saved elsewhere (健康 screen, load).
+  useEffect(() => {
+    setProfileHeightDraft((prev) => (savedHeight != null && Number(prev) === savedHeight ? prev : savedHeight == null ? '' : String(savedHeight)));
+  }, [savedHeight]);
+
+  const updateProfileHeight = (raw: string) => {
+    setProfileHeightDraft(raw);
+    const height = Number(raw);
+    if (raw.trim() && Number.isFinite(height) && height >= 50 && height <= 250) {
+      setSavedHeight(height);
+      writeStoredHeight(height);
+      setHealthForm((prev) => ({ ...prev, height: String(height) }));
+    }
+  };
+
+  // Targets without exercise, broken down step by step for 設定.
+  const baseRequirements = useMemo(() => calcRequirements(energyProfile, 0), [energyProfile]);
 
   // The single source of the day's energy requirement and P/F/C/salt targets
   // (BMR × PAL + that day's net exercise), used by every screen, the chart and
@@ -3340,6 +3360,19 @@ export default function HomePage() {
               <input type="number" value={profile.age} onChange={(e) => setProfile({ ...profile, age: Number(e.target.value) })} />
             </label>
             <label>
+              身長(cm)
+              <input
+                type="number"
+                min="50"
+                max="250"
+                step="0.1"
+                inputMode="decimal"
+                value={profileHeightDraft}
+                placeholder="未入力"
+                onChange={(e) => updateProfileHeight(e.target.value)}
+              />
+            </label>
+            <label>
               体重(kg)
               <input
                 type="number"
@@ -3389,7 +3422,76 @@ export default function HomePage() {
                 : '体重の健康記録がないため、手動で入力してください。'}
             </small>
           </p>
-          <p><small>推定エネルギー必要量は体重と活動レベルを元に簡易計算しています。</small></p>
+        </div>
+
+        <div className="page-card">
+          <h2 className="section-title">推奨値と計算の内訳</h2>
+          {baseRequirements.ok ? (() => {
+            const r = baseRequirements.value;
+            const kcal = (n: number) => `${Math.round(n).toLocaleString()} kcal`;
+            const ageGroupLabel = r.ageGroup === '75+' ? '75歳以上' : `${r.ageGroup.replace('-', '〜')}歳`;
+            const constant = profile.sex === 'male' ? '0.4235' : '0.9708';
+            return (
+              <>
+                <p><small>運動をしない日の値です。運動した日は、正味の運動消費カロリーをエネルギーに加え、P・F・C もその合計から計算します。</small></p>
+                <div className="requirement-list">
+                  <div className="summary-item"><span>エネルギー</span><strong>{kcal(r.energy)}</strong></div>
+                  <div className="summary-item"><span>たんぱく質（目標）</span><strong>{r.proteinG}g</strong></div>
+                  <div className="summary-item"><span>たんぱく質（推奨量・確認用）</span><strong>{r.proteinRda}g以上</strong></div>
+                  <div className="summary-item"><span>脂質</span><strong>{r.fatG}g</strong></div>
+                  <div className="summary-item"><span>炭水化物</span><strong>{r.carbsG}g</strong></div>
+                  <div className="summary-item"><span>食塩相当量</span><strong>{r.saltMaxG}g未満</strong></div>
+                </div>
+                <ol className="requirement-steps">
+                  <li>
+                    <strong>基礎代謝量（国立健康・栄養研究所の式）</strong>
+                    <span>
+                      (0.0481 × {profile.weight} + 0.0234 × {savedHeight} − 0.0138 × {profile.age} − {constant}) × 1,000 ÷ 4.186 ＝ {kcal(r.bmr)}
+                    </span>
+                  </li>
+                  <li>
+                    <strong>身体活動レベル（表4・{ageGroupLabel}）</strong>
+                    <span>「{ACTIVITY_LABELS[r.activity]}」 ＝ {r.pal.toFixed(2)}</span>
+                  </li>
+                  <li>
+                    <strong>エネルギー必要量</strong>
+                    <span>{kcal(r.bmr)} × {r.pal.toFixed(2)} ＝ {kcal(r.baseEnergy)}</span>
+                  </li>
+                  <li>
+                    <strong>たんぱく質</strong>
+                    <span>
+                      目標量 {r.proteinTargetPct[0]}〜{r.proteinTargetPct[1]}% の中間 {r.proteinPct}% → {r.energy.toLocaleString()} × {r.proteinPct}% ÷ 4 ＝ {r.proteinG}g（推奨量 {r.proteinRda}g を下回らないことも確認）
+                    </span>
+                  </li>
+                  <li>
+                    <strong>脂質</strong>
+                    <span>{r.fatPct}% → {r.energy.toLocaleString()} × {r.fatPct}% ÷ 9 ＝ {r.fatG}g</span>
+                  </li>
+                  <li>
+                    <strong>炭水化物</strong>
+                    <span>残り {r.carbsPct}% → {r.energy.toLocaleString()} × {r.carbsPct}% ÷ 4 ＝ {r.carbsG}g</span>
+                  </li>
+                  <li>
+                    <strong>食塩相当量</strong>
+                    <span>目標量（{profile.sex === 'male' ? '男性' : '女性'}、18歳以上）{r.saltMaxG}g未満</span>
+                  </li>
+                </ol>
+                {r.warnings.map((warning) => (
+                  <p key={warning}><small className="weekly-summary-error">{warning}</small></p>
+                ))}
+              </>
+            );
+          })() : (
+            <p><small className="weekly-summary-error">{baseRequirements.reason}</small></p>
+          )}
+          <div className="requirement-source-list">
+            <strong>出典</strong>
+            <ul>
+              {REQUIREMENT_SOURCES.map((source) => (
+                <li key={source}><small>{source}</small></li>
+              ))}
+            </ul>
+          </div>
         </div>
       </section>
     </main>
