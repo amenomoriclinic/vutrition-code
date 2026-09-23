@@ -401,6 +401,25 @@ const writeStoredHeight = (height: number | null) => {
   }
 };
 
+// Per-entry calories above these are almost always typos (e.g. 400 → 4000).
+// They are not blocked: the user is asked to confirm before saving.
+const UNUSUAL_EXERCISE_KCAL = 2000;
+const UNUSUAL_MEAL_KCAL = 3000;
+
+const confirmUnusualExerciseCalories = (kcal: number) => {
+  if (kcal <= UNUSUAL_EXERCISE_KCAL) return true;
+  return window.confirm(
+    `消費カロリーが ${Math.round(kcal)} kcal になっています。\n1回の運動としては大きな値です。本当に保存しますか？`
+  );
+};
+
+const confirmUnusualMealCalories = (items: Array<{ name: string; calories: number }>) => {
+  const unusual = items.filter((item) => item.calories > UNUSUAL_MEAL_KCAL);
+  if (unusual.length === 0) return true;
+  const lines = unusual.map((item) => `・${item.name || '(名前なし)'}: ${Math.round(item.calories)} kcal`).join('\n');
+  return window.confirm(`1品としては大きなカロリーです。\n${lines}\n本当に保存しますか？`);
+};
+
 export default function HomePage() {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
@@ -411,6 +430,7 @@ export default function HomePage() {
   const [actualAmount, setActualAmount] = useState(100);
   const [actualUnit, setActualUnit] = useState<LabelAmountUnit>('g');
   const [exerciseTab, setExerciseTab] = useState<'run' | 'manual' | 'met'>('run');
+  const [exerciseInputs, setExerciseInputs] = useState({ runKm: '0', manualKcal: '0', met: '3.5', metMinutes: '30' });
   const [estimates, setEstimates] = useState<EditableEstimate[]>([]);
   const [records, setRecords] = useState<NutritionRecord[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFood[]>(defaultFavorites);
@@ -1964,7 +1984,14 @@ export default function HomePage() {
             type="button"
             className={`button-primary record-edit-save save-feedback-button save-feedback-button-${st}`}
             disabled={st === 'saving'}
-            onClick={() => { void runSave('record-edit', saveRecordEdit); }}
+            onClick={() => {
+              const kcal = Number(draft.calories) || 0;
+              const confirmed = exercise
+                ? confirmUnusualExerciseCalories(kcal)
+                : confirmUnusualMealCalories([{ name: draft.name.trim(), calories: kcal }]);
+              if (!confirmed) return;
+              void runSave('record-edit', saveRecordEdit);
+            }}
           >
             {st === 'saving' ? '保存中...' : st === 'error' ? '保存に失敗しました' : '修正を保存'}
           </button>
@@ -2461,7 +2488,10 @@ export default function HomePage() {
               <button
                 className={`button-primary save-feedback-button save-feedback-button-${st}`}
                 type="button"
-                onClick={() => { void runSave('meal', saveAllEstimates); }}
+                onClick={() => {
+                  if (!confirmUnusualMealCalories(estimates)) return;
+                  void runSave('meal', saveAllEstimates);
+                }}
                 disabled={st === 'saving'}
               >
                 {st === 'saving' ? '保存中...' : st === 'success' ? '✓ 保存しました' : st === 'error' ? '保存に失敗しました' : '保存する'}
@@ -2483,16 +2513,16 @@ export default function HomePage() {
             const st = saveStates['exercise-run'] ?? 'idle';
             return (
             <div style={{display:'flex', gap:8, alignItems:'center'}}>
-              <input id="run-km" type="number" step="0.1" min="0" defaultValue={0} style={{width:120}} />
+              <input id="run-km" type="number" step="0.1" min="0" value={exerciseInputs.runKm} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, runKm: e.target.value }))} style={{width:120}} />
               <button
                 type="button"
                 className={`button-primary save-feedback-button save-feedback-button-${st}`}
                 disabled={st === 'saving'}
                 onClick={() => {
-                  const el = document.getElementById('run-km') as HTMLInputElement | null;
-                  const km = el ? Number(el.value) : 0;
+                  const km = Number(exerciseInputs.runKm);
                   if (!km || km <= 0) { setStatusMessage('距離を入力してください。'); return; }
                   const caloriesBurned = Math.round(profile.weight * km * 1.036);
+                  if (!confirmUnusualExerciseCalories(caloriesBurned)) return;
                   const insert: NutritionRecordInsert = { name: `ランニング ${km} km`, amount_text: null, calories: caloriesBurned, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
                   void runSave('exercise-run', () => saveExerciseRecord(insert));
                 }}
@@ -2506,15 +2536,15 @@ export default function HomePage() {
             const st = saveStates['exercise-manual'] ?? 'idle';
             return (
             <div style={{display:'flex', gap:8, alignItems:'center'}}>
-              <input id="manual-cal" type="number" step="1" min="0" defaultValue={0} style={{width:120}} />
+              <input id="manual-cal" type="number" step="1" min="0" value={exerciseInputs.manualKcal} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, manualKcal: e.target.value }))} style={{width:120}} />
               <button
                 type="button"
                 className={`button-primary save-feedback-button save-feedback-button-${st}`}
                 disabled={st === 'saving'}
                 onClick={() => {
-                  const el = document.getElementById('manual-cal') as HTMLInputElement | null;
-                  const kcal = el ? Math.round(Number(el.value)) : 0;
+                  const kcal = Math.round(Number(exerciseInputs.manualKcal));
                   if (!kcal || kcal <= 0) { setStatusMessage('消費カロリーを入力してください。'); return; }
+                  if (!confirmUnusualExerciseCalories(kcal)) return;
                   const insert: NutritionRecordInsert = { name: `運動（手動）`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: null, image_url: null };
                   void runSave('exercise-manual', () => saveExerciseRecord(insert));
                 }}
@@ -2528,24 +2558,23 @@ export default function HomePage() {
             const st = saveStates['exercise-met'] ?? 'idle';
             return (
             <div style={{display:'flex', gap:8, alignItems:'center'}}>
-              <select id="met-select">
+              <select id="met-select" value={exerciseInputs.met} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, met: e.target.value }))}>
                 <option value="3.5">軽め - MET 3.5</option>
                 <option value="6.0">強め - MET 6.0</option>
                 <option value="7.0">高強度 - MET 7.0</option>
               </select>
-              <input id="met-min" type="number" defaultValue={30} min={1} style={{width:80}} />
+              <input id="met-min" type="number" min={1} value={exerciseInputs.metMinutes} onChange={(e) => setExerciseInputs((prev) => ({ ...prev, metMinutes: e.target.value }))} style={{width:80}} />
               <button
                 type="button"
                 className={`button-primary save-feedback-button save-feedback-button-${st}`}
                 disabled={st === 'saving'}
                 onClick={() => {
-                  const metEl = document.getElementById('met-select') as HTMLSelectElement | null;
-                  const minEl = document.getElementById('met-min') as HTMLInputElement | null;
-                  const met = metEl ? Number(metEl.value) : 0;
-                  const min = minEl ? Number(minEl.value) : 0;
+                  const met = Number(exerciseInputs.met);
+                  const min = Number(exerciseInputs.metMinutes);
                   if (!met || !min) { setStatusMessage('METと時間を入力してください。'); return; }
                   const hours = min / 60;
                   const kcal = Math.round(met * profile.weight * hours);
+                  if (!confirmUnusualExerciseCalories(kcal)) return;
                   const insert: NutritionRecordInsert = { name: `筋トレ ${min}分`, amount_text: null, calories: kcal, protein: 0, fat: 0, carbs: 0, salt: 0, multiplier: 1, source: 'exercise', description: `MET ${met}`, image_url: null };
                   void runSave('exercise-met', () => saveExerciseRecord(insert));
                 }}
