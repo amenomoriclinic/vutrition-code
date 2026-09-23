@@ -6,7 +6,7 @@ import supabase, { isSupabaseConfigured } from '../lib/supabase';
 import NutritionChart from './components/NutritionChart';
 import FloatingButton from './components/FloatingButton';
 import HealthTrendChart, { HealthTrendRange } from './components/HealthTrendChart';
-import { calcRequirements, netMetKcal, netRunningKcal } from '../lib/dri';
+import { ACTIVITY_LABELS, activityDescription, calcRequirements, netMetKcal, netRunningKcal, palFor } from '../lib/dri';
 
 type Sex = 'male' | 'female';
 type ActivityLevel = 'low' | 'moderate' | 'high';
@@ -354,11 +354,6 @@ const defaultFavorites: FavoriteFood[] = [
 
 const defaultFavoriteById = new Map(defaultFavorites.map((item) => [item.id, item]));
 
-const activityLabels: Record<ActivityLevel, string> = {
-  low: '低い(デスク中心)',
-  moderate: '普通(立ち仕事/ウォーキング)',
-  high: '高い(運動習慣あり)',
-};
 
 const labelDisplayUnitOptions: Record<LabelDisplayUnit, { label: string; baseAmount: number; baseUnit: LabelAmountUnit; defaultActualUnit: LabelAmountUnit }> = {
   per100g: { label: '100gあたり', baseAmount: 100, baseUnit: 'g', defaultActualUnit: 'g' },
@@ -3181,6 +3176,11 @@ export default function HomePage() {
               {dayRequirements.warnings.map((warning) => (
                 <p key={warning}><small className="weekly-summary-error">{warning}</small></p>
               ))}
+              <p className="requirement-sources">
+                <small>
+                  出典: 日本人の食事摂取基準（2025年版）、国立健康・栄養研究所の式。計算の内訳は「設定」で確認できます。
+                </small>
+              </p>
             </>
           ) : (
             <div className="summary-item summary-item-stacked">
@@ -3355,15 +3355,33 @@ export default function HomePage() {
                 <option value="female">女性</option>
               </select>
             </label>
-            <label>
-              身体活動レベル
-              <select value={profile.activity} onChange={(e) => setProfile({ ...profile, activity: e.target.value as ActivityLevel })}>
-                <option value="low">低い</option>
-                <option value="moderate">普通</option>
-                <option value="high">高い</option>
-              </select>
-            </label>
           </div>
+          <fieldset className="activity-options">
+            <legend>身体活動レベル</legend>
+            {(['low', 'moderate', 'high'] as ActivityLevel[]).map((level) => {
+              const pal = palFor(level, profile.age);
+              const unavailable = level === 'high' && profile.age >= 75;
+              return (
+                <label key={level} className={`activity-option${profile.activity === level ? ' is-selected' : ''}${unavailable ? ' is-disabled' : ''}`}>
+                  <input
+                    type="radio"
+                    name="activity-level"
+                    value={level}
+                    checked={profile.activity === level}
+                    disabled={unavailable}
+                    onChange={() => setProfile({ ...profile, activity: level })}
+                  />
+                  <span className="activity-option-body">
+                    <strong>
+                      {ACTIVITY_LABELS[level]}
+                      {pal != null ? `（${pal.toFixed(2)}）` : ''}
+                    </strong>
+                    <small>{unavailable ? '75歳以上には「高い」の区分はありません。' : activityDescription(level, profile.age)}</small>
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
           <p>
             <small>
               {latestHealthWeight != null

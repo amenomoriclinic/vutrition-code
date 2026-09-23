@@ -89,6 +89,39 @@ export const netMetKcal = (met: number, weightKg: number, hours: number) =>
 // at ~5 kcal per litre of O2 → 1.0 kcal per kg per km.
 export const netRunningKcal = (weightKg: number, km: number) => weightKg * km * 1.0;
 
+export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
+  low: '低い',
+  moderate: 'ふつう',
+  high: '高い',
+};
+
+// 日常生活の内容 from エネルギー 表5 p.68.
+export const ACTIVITY_DESCRIPTIONS: Record<ActivityLevel, string> = {
+  low: '生活の大部分が座位で、静的な活動が中心の場合',
+  moderate: '座位中心の仕事だが、職場内での移動や立位での作業・接客等、通勤・買い物での歩行、家事、軽いスポーツのいずれかを含む場合',
+  high: '移動や立位の多い仕事への従事者、あるいは、スポーツ等余暇における活発な運動習慣を持っている場合',
+};
+
+// 75歳以上 from the note to 参考表2 p.78 (there is no 「高い」 at this age).
+export const ACTIVITY_DESCRIPTIONS_75_PLUS: Partial<Record<ActivityLevel, string>> = {
+  low: '自宅にいてほとんど外出しない場合（高齢者施設で自立に近い状態で過ごしている場合を含む）',
+  moderate: '自立している場合',
+};
+
+export const activityDescription = (activity: ActivityLevel, age: number) =>
+  (ageGroupOf(age) === '75+' ? ACTIVITY_DESCRIPTIONS_75_PLUS[activity] : undefined) ?? ACTIVITY_DESCRIPTIONS[activity];
+
+export const palFor = (activity: ActivityLevel, age: number): number | null => {
+  const group = ageGroupOf(age);
+  return group ? palTable[group][activity] : null;
+};
+
+export const REQUIREMENT_SOURCES = [
+  '日本人の食事摂取基準（2025年版）（厚生労働省）: 身体活動レベル（表4 p.67・表5 p.68）、たんぱく質の推奨量・目標量（p.103）、食塩相当量の目標量（p.248）',
+  '国立健康・栄養研究所の式（Ganpule AA ほか. Eur J Clin Nutr 2007;61:1256-61。食事摂取基準2025年版 表2 p.65 に掲載）: 基礎代謝量',
+  '運動（正味）: メッツ法 (メッツ − 1) × 体重 × 時間、ランニングは ACSM の代謝式による 体重 × 距離 × 1.0',
+];
+
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export function calcRequirements(profile: EnergyProfile, exerciseNetKcal = 0): RequirementsResult {
