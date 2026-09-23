@@ -113,6 +113,19 @@ type FavoriteFood = {
   labelBase?: FavoriteLabelBase | null;
 };
 
+// Raw input strings of the favorite food form (adding or editing).
+type FavoriteDraft = {
+  name: string;
+  amountText: string;
+  calories: string;
+  protein: string;
+  fat: string;
+  carbs: string;
+  salt: string;
+  phosphorus: string;
+  phosphorusAbsorptionRate: string;
+};
+
 type FavoriteLabelBase = {
   amountText: string;
   amount: number;
@@ -607,7 +620,9 @@ export default function HomePage() {
   const [view, setView] = useState<AppView>('home');
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [favoriteName, setFavoriteName] = useState('');
+  // null: form closed, 'new': adding, otherwise the id of the favorite being edited.
+  const [favoriteFormTarget, setFavoriteFormTarget] = useState<string | null>(null);
+  const [favoriteDraft, setFavoriteDraft] = useState<FavoriteDraft | null>(null);
   const [textFoodName, setTextFoodName] = useState('');
   const [textFoodAmount, setTextFoodAmount] = useState('');
   const [pendingFoods, setPendingFoods] = useState<PendingFood[]>([]);
@@ -2122,26 +2137,161 @@ export default function HomePage() {
     return saved;
   };
 
-  const addFavorite = async () => {
-    if (!favoriteName.trim()) {
-      setFavoritesMessage('定番食品の名前を入力してください。');
-      return;
-    }
-    const saved = await insertFavorite({
-      id: '',
-      name: favoriteName.trim(),
-      amountText: '1単位',
-      calories: 0,
-      protein: 0,
-      fat: 0,
-      carbs: 0,
-      salt: 0,
-      phosphorus: 0,
-      phosphorusAbsorptionRate: 0.5,
+  const openFavoriteForm = (favorite?: FavoriteFood) => {
+    setFavoritesMessage('');
+    setFavoriteFormTarget(favorite ? favorite.id : 'new');
+    setFavoriteDraft({
+      name: favorite?.name ?? '',
+      amountText: favorite?.amountText ?? '',
+      calories: favorite ? String(favorite.calories) : '',
+      protein: favorite ? String(favorite.protein) : '',
+      fat: favorite ? String(favorite.fat) : '',
+      carbs: favorite ? String(favorite.carbs) : '',
+      salt: favorite ? String(favorite.salt) : '',
+      phosphorus: favorite ? String(favorite.phosphorus) : '',
+      phosphorusAbsorptionRate: String(favorite?.phosphorusAbsorptionRate ?? 0.5),
     });
-    if (saved) {
-      setFavoriteName('');
+  };
+
+  const closeFavoriteForm = () => {
+    setFavoriteFormTarget(null);
+    setFavoriteDraft(null);
+  };
+
+  const saveFavoriteForm = async (): Promise<boolean> => {
+    const target = favoriteFormTarget;
+    const draft = favoriteDraft;
+    if (!target || !draft) return false;
+    if (favoritesSource !== 'db') {
+      setFavoritesMessage('定番食品のデータベースが使えないため保存できません。');
+      return false;
     }
+
+    const name = draft.name.trim();
+    if (!name) {
+      setFavoritesMessage('名前を入力してください。');
+      return false;
+    }
+    // Blank fields count as 0; anything non-numeric or negative is rejected.
+    const parse = (raw: string, round: (n: number) => number) => {
+      if (!raw.trim()) return 0;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? round(value) : null;
+    };
+    const values = {
+      calories: parse(draft.calories, round1),
+      protein: parse(draft.protein, round1),
+      fat: parse(draft.fat, round1),
+      carbs: parse(draft.carbs, round1),
+      salt: parse(draft.salt, round2),
+      phosphorus: parse(draft.phosphorus, round1),
+    };
+    if (Object.values(values).some((v) => v == null)) {
+      setFavoritesMessage('栄養値を正しく入力してください。');
+      return false;
+    }
+    const rate = Number(draft.phosphorusAbsorptionRate);
+    const fields = {
+      name,
+      amountText: draft.amountText.trim(),
+      calories: values.calories as number,
+      protein: values.protein as number,
+      fat: values.fat as number,
+      carbs: values.carbs as number,
+      salt: values.salt as number,
+      phosphorus: values.phosphorus as number,
+      phosphorusAbsorptionRate: clampPhosphorusAbsorptionRate(draft.phosphorusAbsorptionRate.trim() ? rate : 0.5),
+    };
+
+    if (target === 'new') {
+      const saved = await insertFavorite({ id: '', ...fields });
+      if (!saved) return false;
+      closeFavoriteForm();
+      return true;
+    }
+
+    const current = favorites.find((f) => f.id === target);
+    if (!current) return false;
+    // label_base and sort order are left as they are.
+    const { data, error } = await supabase
+      .from('favorite_foods')
+      .update({
+        name: fields.name,
+        amount_text: fields.amountText || null,
+        calories: fields.calories,
+        protein: fields.protein,
+        fat: fields.fat,
+        carbs: fields.carbs,
+        salt: fields.salt,
+        phosphorus: fields.phosphorus,
+        phosphorus_absorption_rate: fields.phosphorusAbsorptionRate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', target)
+      .select('*');
+    if (error || !data || data.length === 0) {
+      console.error('[favorites] update failed', error);
+      setFavoritesMessage(`定番食品の保存に失敗しました: ${error ? formatSupabaseError(error) : '画面を再読み込みしてお試しください'}`);
+      return false;
+    }
+    const saved = mapFavoriteRow(data[0]);
+    setFavorites((prev) => prev.map((f) => (f.id === target ? saved : f)));
+    closeFavoriteForm();
+    return true;
+  };
+
+  const renderFavoriteForm = () => {
+    if (!favoriteFormTarget || !favoriteDraft) return null;
+    const draft = favoriteDraft;
+    const st = saveStates['favorite-form'] ?? 'idle';
+    const setField = (key: keyof FavoriteDraft) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setFavoriteDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+    };
+    const numberField = (key: keyof FavoriteDraft, label: string, step: string) => (
+      <label className="record-edit-field">
+        <span>{label}</span>
+        <input type="number" min="0" step={step} inputMode="decimal" value={draft[key]} onChange={setField(key)} />
+      </label>
+    );
+    return (
+      <div className="record-edit-form favorite-form">
+        <strong>{favoriteFormTarget === 'new' ? '新しい定番食品' : '定番食品を編集'}</strong>
+        <div className="record-edit-grid">
+          <label className="record-edit-field record-edit-field-wide">
+            <span>名前</span>
+            <input value={draft.name} onChange={setField('name')} placeholder="例: 豆腐 250g" />
+          </label>
+          <label className="record-edit-field record-edit-field-wide">
+            <span>量</span>
+            <input value={draft.amountText} onChange={setField('amountText')} placeholder="例: 250g" />
+          </label>
+          {numberField('calories', 'kcal', '1')}
+          {numberField('protein', 'P(g)', '0.1')}
+          {numberField('fat', 'F(g)', '0.1')}
+          {numberField('carbs', 'C(g)', '0.1')}
+          {numberField('salt', '食塩相当量(g)', '0.01')}
+          {numberField('phosphorus', 'リン(mg)', '1')}
+          {numberField('phosphorusAbsorptionRate', 'リン吸収率(0〜1)', '0.05')}
+        </div>
+        <div className="record-edit-actions">
+          <button
+            type="button"
+            className={`button-primary record-edit-save save-feedback-button save-feedback-button-${st}`}
+            disabled={st === 'saving'}
+            onClick={() => {
+              if (!confirmUnusualMealCalories([{ name: draft.name.trim(), calories: Number(draft.calories) || 0 }])) return;
+              void runSave('favorite-form', saveFavoriteForm);
+            }}
+          >
+            {st === 'saving' ? '保存中...' : st === 'error' ? '保存に失敗しました' : '保存'}
+          </button>
+          <button type="button" className="button-secondary record-edit-cancel" disabled={st === 'saving'} onClick={closeFavoriteForm}>
+            キャンセル
+          </button>
+        </div>
+      </div>
+    );
   };
 
   const removeFavorite = async (id: string) => {
@@ -2165,6 +2315,9 @@ export default function HomePage() {
     }
     setFavorites((prev) => prev.filter((f) => f.id !== id));
     setFavoritesMessage('');
+    if (favoriteFormTarget === id) {
+      closeFavoriteForm();
+    }
   };
 
   const removeRecord = (id: string) => {
@@ -2827,15 +2980,15 @@ export default function HomePage() {
         <div className="page-card">
           <h2 className="section-title">マイ定番食品</h2>
           <p>よく使う組成が固定された食品を登録して、ワンタップで記録できます。</p>
-          <div className="field-grid field-grid-2">
-            <label>
-              新しい定番食品名
-              <input value={favoriteName} onChange={(e) => setFavoriteName(e.target.value)} placeholder="例: おにぎり" />
-            </label>
-            <button className="button-secondary" type="button" disabled={favoritesSource !== 'db'} onClick={() => { void addFavorite(); }}>
-              定番食品に追加
-            </button>
-          </div>
+          <button
+            className="button-secondary"
+            type="button"
+            disabled={favoritesSource !== 'db' || favoriteFormTarget === 'new'}
+            onClick={() => openFavoriteForm()}
+          >
+            ＋ 新しい定番食品
+          </button>
+          {favoriteFormTarget === 'new' ? renderFavoriteForm() : null}
           {favoritesMessage ? <p><small className="weekly-summary-error">{favoritesMessage}</small></p> : null}
           {favoritesSource === 'loading' ? <p><small>定番食品を読み込み中...</small></p> : null}
           <div className="card-row">
@@ -2844,12 +2997,22 @@ export default function HomePage() {
                 <button className="button-small" type="button" onClick={() => addFavoriteRecord(favorite)}>
                   {favorite.name}
                 </button>
+                <button
+                  className="button-secondary favorite-edit"
+                  type="button"
+                  aria-label={`${favorite.name}を編集`}
+                  disabled={favoritesSource !== 'db' || favoriteFormTarget === favorite.id}
+                  onClick={() => openFavoriteForm(favorite)}
+                >
+                  編集
+                </button>
                 <button className="button-danger record-delete" type="button" aria-label="削除" disabled={favoritesSource !== 'db'} onClick={() => { void removeFavorite(favorite.id); }}>
                   ×
                 </button>
               </div>
             ))}
           </div>
+          {favoriteFormTarget && favoriteFormTarget !== 'new' ? renderFavoriteForm() : null}
         </div>
 
         <div className="page-card">

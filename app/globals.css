@@ -239,6 +239,16 @@ main {
   font-size: 0.85rem;
 }
 
+.favorite-item .favorite-edit {
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
+.favorite-form {
+  margin: 12px 0;
+}
+
 .favorite-item .button-danger {
   padding: 6px 10px;
   min-width: auto;
