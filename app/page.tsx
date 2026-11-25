@@ -1178,17 +1178,21 @@ export default function HomePage() {
 
     setHealthTrendLoading(true);
     const today = toJstDateString();
-    const since = new Date();
-    since.setDate(since.getDate() - (range - 1));
-    const periodStart = toJstDateString(since);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('health_records')
       .select('id,date,weight,body_fat,muscle_mass,bone_mass,metabolic_age,height,bmi,systolic_bp,diastolic_bp,pulse,created_at')
-      .gte('date', periodStart)
       .lte('date', today)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
+
+    if (range !== 'all') {
+      const since = new Date();
+      since.setDate(since.getDate() - (range - 1));
+      query = query.gte('date', toJstDateString(since));
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('[health] trend fetch failed', error);
