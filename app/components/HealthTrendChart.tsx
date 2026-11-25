@@ -15,9 +15,14 @@ import { Line } from "react-chartjs-2";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-export type HealthTrendRange = 7 | 30 | 90;
+export type HealthTrendRange = 7 | 30 | 90 | 'all';
 
-export const HEALTH_TREND_RANGES: HealthTrendRange[] = [7, 30, 90];
+export const HEALTH_TREND_RANGES: Array<{ value: HealthTrendRange; label: string }> = [
+  { value: 7, label: '7日間' },
+  { value: 30, label: '30日間' },
+  { value: 90, label: '90日間' },
+  { value: 'all', label: '設定来' },
+];
 
 // Structural subset of the page's HealthRecord; rows must be sorted by date ascending.
 export type HealthTrendPoint = {
@@ -54,7 +59,23 @@ const shortDate = (date: string) => {
   return month && day ? `${Number(month)}/${Number(day)}` : date;
 };
 
+// Weight change over the period: latest minus first (both must be non-null).
+const calcWeightChange = (records: HealthTrendPoint[]): number | null => {
+  const weighted = records.filter((r) => r.weight != null);
+  if (weighted.length < 2) return null;
+  const first = weighted[0].weight as number;
+  const last = weighted[weighted.length - 1].weight as number;
+  return Math.round((last - first) * 10) / 10;
+};
+
+const formatWeightChange = (diff: number): string => {
+  const sign = diff > 0 ? '+' : '';
+  return `${sign}${diff}kg`;
+};
+
 export default function HealthTrendChart({ records, range, onRangeChange, loading }: Props) {
+  const weightChange = useMemo(() => calcWeightChange(records), [records]);
+
   const charts = useMemo(() => {
     // Each chart keeps only the dates where its own metric was recorded, so a day
     // with just a weight entry does not punch a hole in the pulse line.
@@ -125,16 +146,23 @@ export default function HealthTrendChart({ records, range, onRangeChange, loadin
   return (
     <div>
       <div className="health-trend-controls">
-        {HEALTH_TREND_RANGES.map((days) => (
+        {HEALTH_TREND_RANGES.map(({ value, label }) => (
           <button
-            key={days}
+            key={value}
             type="button"
-            className={`health-trend-range-button${range === days ? ' health-trend-range-button-active' : ''}`}
-            onClick={() => onRangeChange(days)}
+            className={`health-trend-range-button${range === value ? ' health-trend-range-button-active' : ''}`}
+            onClick={() => onRangeChange(value)}
           >
-            {days}日間
+            {label}
           </button>
         ))}
+        {!loading && weightChange != null && (
+          <span className="health-trend-weight-change">
+            体重変化: <strong style={{ color: weightChange < 0 ? '#2a78d6' : weightChange > 0 ? '#e34948' : '#64748b' }}>
+              {formatWeightChange(weightChange)}
+            </strong>
+          </span>
+        )}
       </div>
       <div className="health-trend-grid">
         {charts.map((chart) => (
